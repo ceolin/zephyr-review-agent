@@ -109,6 +109,14 @@ def test_test_candidates_tool_text(intel: SourceIntel):
     assert "validate platform identifiers with list_platforms" in rest
 
 
+def test_boards_including_follows_dtsi_chain(intel: SourceIntel):
+    both = {"vndboard/vndsoc/cpuapp", "vndboard/vndsoc/cpuapp/ns"}
+    assert intel._boards_including("dts/arm/vnd/vndsoc.dtsi") == both
+    assert intel._boards_including("dts/arm/vnd/vndsoc_common.dtsi") == both  # one level of indirection
+    assert intel._boards_including("dts/arm/vnd/vndsoc_common.dtsi", depth=1) == set()
+    assert intel._boards_including("dts/arm/vnd/nothing.dtsi") == set()
+
+
 def test_list_platforms_tool_text(intel: SourceIntel):
     assert "4 platform identifiers across 2 boards" in intel.platforms("")
     assert "vndboard/vndsoc/cpuapp  (Vendor Board; boards/vnd/vndboard)" in intel.platforms("vnd")

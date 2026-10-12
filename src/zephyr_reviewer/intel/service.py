@@ -476,7 +476,9 @@ class SourceIntel:
                             if p.startswith("boards/"):
                                 compat_boards.setdefault(compat, set()).update(idx.for_path(p))
                             else:
-                                compat_boards.setdefault(compat, set()).add(f"(dtsi: {p})")
+                                via = self._boards_including(p)
+                                compat_boards.setdefault(compat, set()).update(via)
+                                compat_boards.setdefault(compat, set()).add(f"(dtsi: {p}: {len(via)} boards)")
         for compat, idents in sorted(compat_boards.items()):
             boards = sorted(i for i in idents if not i.startswith("(dtsi"))
             dtsis = sorted(i for i in idents if i.startswith("(dtsi"))
@@ -484,7 +486,7 @@ class SourceIntel:
             if len(boards) > 25:
                 line += f" (+{len(boards) - 25} more)"
             if dtsis:
-                line += "; also in SoC/shield dtsi: " + ", ".join(d[7:-1] for d in dtsis[:6])
+                line += "; via SoC/shield dtsi: " + ", ".join(d[7:-1] for d in dtsis[:6])
             out.append(line)
         archs = sorted({p.split("/")[1] for p in changed_all if p.startswith("arch/") and p.count("/") >= 2})
         if archs:
@@ -499,6 +501,32 @@ class SourceIntel:
             "Scenario ids are '<path>/<scenario>' for twister -s; validate platform identifiers with list_platforms."
         )
         return self._clip("\n".join(out))
+
+    def _boards_including(self, dtsi_path: str, depth: int = 3) -> set[str]:
+        """Platform identifiers of boards whose DTS includes ``dtsi_path``, following dtsi-to-dtsi includes."""
+        idx = self.platform_index
+        found: set[str] = set()
+        seen: set[str] = set()
+        frontier = [dtsi_path]
+        for _ in range(depth):
+            next_frontier: list[str] = []
+            for path in frontier:
+                if path in seen:
+                    continue
+                seen.add(path)
+                base = path.rsplit("/", 1)[-1]
+                hits, _ = self.head.grep(
+                    rf"#include[[:space:]]+[<\"].*{re.escape(base)}[>\"]", regex=True, max_results=600
+                )
+                for h in hits:
+                    if h.path.startswith("boards/") and h.path.endswith((".dts", ".dtsi")):
+                        found.update(idx.for_path(h.path))
+                    elif h.path.endswith(".dtsi") and h.path not in seen:
+                        next_frontier.append(h.path)
+            frontier = next_frontier
+            if not frontier:
+                break
+        return found
 
     def _compatibles_for_drv(self, drv_compat: str) -> list[str]:
         """vnd_foo_i2c -> ['vnd,foo-i2c'] by matching binding compatibles."""

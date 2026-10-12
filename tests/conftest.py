@@ -173,6 +173,8 @@ ZTEST(i2c_foo, test_transfer)
 """
 
 BOARD_DTS = """\
+#include <arm/vnd/vndsoc.dtsi>
+
 / {
 \ti2c0: i2c@40000000 {
 \t\tcompatible = "vnd,foo-i2c";
@@ -259,6 +261,8 @@ def mini_repo(tmp_path_factory: pytest.TempPathFactory) -> dict:
     _write(root, "boards/native/native_sim/native_sim_native_64.dts", "/ { };\n")
     _write(root, "boards/native/native_sim/board.yml", NATIVE_BOARD_YML)
     _write(root, "scripts/ci/tags.yaml", TAGS_YAML)
+    _write(root, "dts/arm/vnd/vndsoc.dtsi", "#include <arm/vnd/vndsoc_common.dtsi>\n/ { soc { }; };\n")
+    _write(root, "dts/arm/vnd/vndsoc_common.dtsi", "/ { chosen { }; };\n")
     _write(root, "tests/kernel/semaphore/tests.yaml", KERNEL_TESTS_YAML)
     _write(root, "tests/kernel/semaphore/src/main.c", "#include <zephyr/ztest.h>\n")
     _write(root, "tests/drivers/i2c/common/helpers.h", "/* shared */\n")
