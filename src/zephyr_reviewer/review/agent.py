@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -15,6 +16,18 @@ from .mcp_client import ToolBridge
 from .openrouter import OpenRouter, Usage, assistant_message_for_history
 from .prompts import BUDGET_EXHAUSTED, NUDGE, rejection_message
 from .schema import SUBMIT_REVIEW_TOOL, SUBMIT_TOOL_NAME, Review, parse_review
+
+
+@dataclass
+class LocalTool:
+    """A tool answered by the orchestrator itself rather than the MCP server (e.g. PR discussion)."""
+
+    schema: dict[str, Any]
+    handler: Callable[[dict[str, Any]], Awaitable[str]]
+
+    @property
+    def name(self) -> str:
+        return self.schema["function"]["name"]
 
 
 @dataclass
@@ -43,11 +56,13 @@ async def run_review(
     max_steps: int = 40,
     max_context_tokens: int = 160_000,
     max_rejections: int = 2,
+    extra_tools: list[LocalTool] | None = None,
     log=print,
 ) -> RunResult:
     started = time.monotonic()
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, {"role": "user", "content": opening}]
-    tools = [*bridge.tools, SUBMIT_REVIEW_TOOL]
+    local = {t.name: t for t in extra_tools or []}
+    tools = [*bridge.tools, *(t.schema for t in local.values()), SUBMIT_REVIEW_TOOL]
     usage = Usage()
     models: list[str] = []
     transcript: list[dict[str, Any]] = []
@@ -117,6 +132,16 @@ async def run_review(
                             None, step, usage, models, forced, errors, transcript, time.monotonic() - started
                         )
                     content = rejection_message(errs)
+                elif name in local:
+                    t0 = time.monotonic()
+                    try:
+                        content = await local[name].handler(args)
+                    except Exception as exc:  # noqa: BLE001 - report to the model, keep reviewing
+                        content = f"ERROR: {type(exc).__name__}: {exc}"
+                    log(f"[step {step}] {name}({_short(args)}) -> {len(content)} chars in {time.monotonic() - t0:.1f}s")
+                    transcript.append(
+                        {"kind": "tool_call", "step": step, "name": name, "arguments": args, "chars": len(content)}
+                    )
                 elif name in bridge.tool_names:
                     content = await bridge.call(name, args)
                     rec = bridge.calls[-1]
@@ -135,7 +160,7 @@ async def run_review(
                         }
                     )
                 else:
-                    available = ", ".join(sorted(bridge.tool_names))
+                    available = ", ".join(sorted(bridge.tool_names | set(local)))
                     content = f"ERROR: unknown tool {name!r}. Available: {available}, {SUBMIT_TOOL_NAME}."
             messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "name": name, "content": content})
 

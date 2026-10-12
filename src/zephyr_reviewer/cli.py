@@ -14,8 +14,9 @@ import sys
 from . import mcp_server
 from .intel import SourceIntel
 from .review import publish as pub
-from .review.agent import run_review
+from .review.agent import LocalTool, run_review
 from .review.config import ReviewConfig
+from .review.discussion import PR_DISCUSSION_TOOL, Discussion
 from .review.github_api import GitHub, PullRequest, pr_number_from_event
 from .review.mcp_client import ToolBridge, stdio_params
 from .review.openrouter import OpenRouter
@@ -163,12 +164,25 @@ def _skip_reason(cfg: ReviewConfig, pr: PullRequest) -> str | None:
     return None
 
 
-async def _run(cfg: ReviewConfig, pr: PullRequest, intel: SourceIntel) -> tuple:
+def _load_discussion(cfg: ReviewConfig, gh: GitHub | None, pr: PullRequest) -> Discussion | None:
+    if gh is None or not pr.number or not cfg.include_discussion:
+        return None
+    d = Discussion.fetch(gh, pr.number, f"<!-- {cfg.comment_tag} -->")
+    log(
+        f"discussion: {len(d.conversation)} comment(s), {len(d.inline)} inline, {len(d.reviews)} review(s)"
+        f"{', previous AI review present' if d.previous_ai else ''}"
+    )
+    return d
+
+
+async def _run(cfg: ReviewConfig, pr: PullRequest, intel: SourceIntel, discussion: Discussion | None = None):
     profile = load_profile(cfg.profile)
     system = system_prompt(profile, cfg.language)
     overview = intel.overview()
     diff = intel.diff_text if len(intel.diff_text) <= cfg.inline_diff_chars else None
-    opening = opening_message(pr, overview, diff, cfg.project_context, cfg.repo_slug)
+    digest = discussion.digest(cfg.max_discussion_chars) if discussion else None
+    opening = opening_message(pr, overview, diff, cfg.project_context, cfg.repo_slug, digest)
+    extra_tools = [LocalTool(PR_DISCUSSION_TOOL, discussion.tool_handler)] if discussion else []
     changed = {f.path: f.new_side_lines for f in intel.files}
     llm = OpenRouter(
         cfg.openrouter_api_key,
@@ -192,6 +206,7 @@ async def _run(cfg: ReviewConfig, pr: PullRequest, intel: SourceIntel) -> tuple:
             changed,
             max_steps=cfg.max_steps,
             max_context_tokens=cfg.max_context_tokens,
+            extra_tools=extra_tools,
             log=log,
         )
     return run
@@ -216,7 +231,7 @@ def cmd_review(args: argparse.Namespace) -> int:
         pub.write_outputs({"skipped": "true", "verdict": "skipped", "findings_count": 0, "highest_severity": "none"})
         return 0
     log(f"reviewing {len(intel.files)} file(s), {len(intel.commits)} commit(s): {cfg.base[:12]}..{cfg.head[:12]}")
-    run = asyncio.run(_run(cfg, pr, intel))
+    run = asyncio.run(_run(cfg, pr, intel, _load_discussion(cfg, gh, pr)))
     if run.review is not None:
         body = render_comment(run.review, run, pr, repo=cfg.repo_slug, tag=cfg.comment_tag, api_url=cfg.github_api_url)
     else:

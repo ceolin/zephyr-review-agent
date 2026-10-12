@@ -125,6 +125,8 @@ def render_comment(
         out += ["### Tests", "", review.test_assessment, ""]
     if review.commit_message_assessment:
         out += ["### Commit messages", "", review.commit_message_assessment, ""]
+    if review.discussion_assessment:
+        out += ["### Existing discussion", "", review.discussion_assessment, ""]
     cost = f" · ${run.usage.cost:.3f}" if run.usage.cost else ""
     out += [
         "---",

@@ -116,6 +116,12 @@ SUBMIT_REVIEW_TOOL: dict[str, Any] = {
                     "behavior is not, and whether tests are required before merge. Empty when the "
                     "change needs no tests.",
                 },
+                "discussion_assessment": {
+                    "type": "string",
+                    "description": "How the existing review discussion stands against the current head: which "
+                    "requests are addressed, which are still open, and any comment the code contradicts, with "
+                    "evidence. Empty when there is no discussion.",
+                },
                 "commit_message_assessment": {
                     "type": "string",
                     "description": "Whether the commit messages "
@@ -155,6 +161,7 @@ class Review:
     findings: list[Finding]
     test_assessment: str = ""
     commit_message_assessment: str = ""
+    discussion_assessment: str = ""
 
     def highest_severity(self) -> str:
         for sev in SEVERITIES:
@@ -259,5 +266,6 @@ def parse_review(args: dict[str, Any], changed_lines: dict[str, set[int]]) -> tu
         findings=findings,
         test_assessment=str(args.get("test_assessment") or "").strip(),
         commit_message_assessment=str(args.get("commit_message_assessment") or "").strip(),
+        discussion_assessment=str(args.get("discussion_assessment") or "").strip(),
     )
     return review, []

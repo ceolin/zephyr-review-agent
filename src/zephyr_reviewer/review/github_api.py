@@ -114,8 +114,17 @@ class GitHub:
             url = resp.links.get("next", {}).get("url")
         return out
 
+    def issue_comments(self, number: int) -> list[dict[str, Any]]:
+        return self._paginate(f"/repos/{self.repo}/issues/{number}/comments")
+
+    def review_comments(self, number: int) -> list[dict[str, Any]]:
+        return self._paginate(f"/repos/{self.repo}/pulls/{number}/comments")
+
+    def reviews(self, number: int) -> list[dict[str, Any]]:
+        return self._paginate(f"/repos/{self.repo}/pulls/{number}/reviews")
+
     def find_comment(self, number: int, marker: str) -> dict[str, Any] | None:
-        for c in self._paginate(f"/repos/{self.repo}/issues/{number}/comments"):
+        for c in self.issue_comments(number):
             if marker in (c.get("body") or ""):
                 return c
         return None

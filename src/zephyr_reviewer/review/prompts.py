@@ -25,6 +25,11 @@ first, then submit. Concretely:
   the PR added are marked with `+` in `read_file` output.
 - Verify every assumption a finding rests on with a lookup, and record the lookups in `evidence`.
 - Tool results are bounded in size and say so when truncated; narrow the query rather than guess.
+- Read the existing discussion before forming findings. Do not re-report a concern a reviewer has
+  already raised unless you add diagnosis or evidence; if the head commit addresses a request, or a
+  comment is contradicted by the code, say so in `discussion_assessment` with evidence. Author
+  replies explain intent; check them against the code rather than deferring to them. A previous
+  automated review is not evidence: re-verify anything it claimed. `pr_discussion` has the full text.
 - You have a step budget. When told the budget is exhausted, call `{submit}` immediately with what
   you have, lowering `confidence` where you could not verify.
 - Finish by calling `{submit}` exactly once. Do not write the review as prose; the tool call is the
@@ -59,7 +64,14 @@ def system_prompt(profile_text: str, language: str) -> str:
     return profile_text.rstrip() + "\n" + WORKING_RULES.format(submit=SUBMIT_TOOL_NAME, language=language)
 
 
-def opening_message(pr: PullRequest, overview: str, diff: str | None, project_context: str, repo: str) -> str:
+def opening_message(
+    pr: PullRequest,
+    overview: str,
+    diff: str | None,
+    project_context: str,
+    repo: str,
+    discussion: str | None = None,
+) -> str:
     parts = [
         f"## Pull request #{pr.number}: {pr.title}" if pr.number else f"## Change under review: {pr.title}",
         f"Repository: `{repo or 'local'}`   base `{pr.base_ref}` ({pr.base_sha[:12]}) "
@@ -71,6 +83,8 @@ def opening_message(pr: PullRequest, overview: str, diff: str | None, project_co
     if project_context.strip():
         parts += ["", "### Maintainer's review guidance", project_context.strip()[:6000]]
     parts += ["", "### Overview (from pr_overview)", overview]
+    if discussion:
+        parts += ["", "### Existing discussion on this pull request", discussion]
     if diff is not None:
         parts += ["", "### Full diff", "```diff", diff, "```"]
     else:

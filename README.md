@@ -117,13 +117,30 @@ nothing from the tree is executed. That is what makes it safe to run on a fork's
 3. The model investigates with the tools. Each turn may issue several calls; results go back with
    their `tool_call_id`. A step budget and a prompt-size budget bound the cost; when either runs out
    the model is forced to submit.
-4. The model ends by calling `submit_review`, a client-side tool whose arguments are the review.
+4. The existing discussion (comments, inline threads, review states) is digested into the opening
+   message, with a `pr_discussion` tool for the full text, so the model builds on the review rather
+   than restarting it.
+5. The model ends by calling `submit_review`, a client-side tool whose arguments are the review.
    Findings are validated: a `line` must be on the new side of the diff to become an inline
    comment, otherwise it is demoted to the summary with a note; a file outside the diff is demoted
    too; a malformed submission is rejected with reasons and the model retries.
-5. The comment is rendered and upserted (one comment per PR, found by a hidden marker), inline
+6. The comment is rendered and upserted (one comment per PR, found by a hidden marker), inline
    comments are posted as a review when enabled, action outputs are set, and `review-output/`
    receives `comment.md`, `review.json` and `transcript.jsonl`.
+
+### Existing discussion
+
+The reviewer reads what has already been said. Before the model starts, the orchestrator fetches
+the conversation, the inline review threads (grouped, with file and line, outdated ones marked),
+and each reviewer's latest review state, and puts a bounded digest in the opening message. The
+full text is available through a `pr_discussion` tool, filterable by file. The previous automated
+review, if one exists, is shown separately and labelled as not being evidence.
+
+The profile tells the model how to use it: a concern a maintainer already raised is theirs, not a
+new finding; a request the head commit satisfies is resolved; author replies are checked against
+the code rather than taken on trust. The outcome lands in a `discussion_assessment` section of the
+comment: which threads are addressed, which are open, and anything the code contradicts. Turn it
+off with `include_discussion: "false"`.
 
 ### Model selection
 
@@ -173,6 +190,7 @@ upstream repository.
 | `src/zephyr_reviewer/review/openrouter.py` | Chat completions with tools, fallback routing, retries |
 | `src/zephyr_reviewer/review/agent.py` | The loop: tool calls, budgets, `submit_review` |
 | `src/zephyr_reviewer/review/schema.py` | Review schema and validation against the diff |
+| `src/zephyr_reviewer/review/discussion.py` | Existing PR comments, threads and review states; digest and `pr_discussion` tool |
 | `src/zephyr_reviewer/review/render.py`, `publish.py`, `github_api.py` | Comment rendering and delivery |
 | `src/zephyr_reviewer/cli.py` | `serve`, `review`, `tools`, `call` |
 | `tests/` | A miniature Zephyr-shaped repository fixture; intel, MCP (in-process and stdio), agent, publish tests |

@@ -62,6 +62,15 @@ inputs:
     required: false
     default: "60000"
 
+  include_discussion:
+    description: "Give the model the existing conversation, inline review threads and review states."
+    required: false
+    default: "true"
+  max_discussion_chars:
+    description: "Size of the discussion digest in the opening message; the full text stays available as a tool."
+    required: false
+    default: "12000"
+
   review_profile:
     description: "Built-in profile name (zephyr) or path to a Markdown file with your own."
     required: false
@@ -156,6 +165,8 @@ runs:
         INPUT_MAX_CONTEXT_TOKENS: ${{ inputs.max_context_tokens }}
         INPUT_MAX_TOOL_RESULT_CHARS: ${{ inputs.max_tool_result_chars }}
         INPUT_INLINE_DIFF_CHARS: ${{ inputs.inline_diff_chars }}
+        INPUT_INCLUDE_DISCUSSION: ${{ inputs.include_discussion }}
+        INPUT_MAX_DISCUSSION_CHARS: ${{ inputs.max_discussion_chars }}
         INPUT_REVIEW_PROFILE: ${{ inputs.review_profile }}
         INPUT_PROJECT_CONTEXT: ${{ inputs.project_context }}
         INPUT_LANGUAGE: ${{ inputs.language }}

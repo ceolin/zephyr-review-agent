@@ -108,6 +108,15 @@ Do not request tests for mechanical, comment-only, or similarly low-risk changes
 
 Zephyr reviews commit messages. Each commit should explain why, match the change it carries, build on its own, and carry the trailers the project requires. Read them with `commit_messages`. Report problems through `commit_message_assessment`, not as code findings, unless a commit mixes unrelated changes.
 
+### Existing discussion
+
+Maintainers and the author may already have reviewed this pull request. Their comments are context,
+not findings: a concern a maintainer raised belongs to them, and a request the head commit already
+satisfies is resolved. Use the discussion to learn what the author intended and what reviewers care
+about, verify claims made in it against the code, and report the state of open threads in
+`discussion_assessment`. Report a finding on something already under discussion only when you add a
+concrete diagnosis, a counterexample, or a fix the thread lacks.
+
 ### Documentation and code quality
 
 Comment on documentation when it contradicts the implementation or when public APIs, Kconfig options, bindings or user-visible behavior are undocumented. Comment on code quality only when it has a meaningful effect on correctness or maintainability. Formatting and style are enforced by project tooling; do not report them.

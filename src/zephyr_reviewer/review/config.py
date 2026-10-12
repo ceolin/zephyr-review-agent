@@ -50,6 +50,8 @@ class ReviewConfig:
     max_context_tokens: int = 160_000
     max_tool_result_chars: int = 24_000
     inline_diff_chars: int = 60_000
+    include_discussion: bool = True
+    max_discussion_chars: int = 12_000
     language: str = "English"
 
     profile: str = "zephyr"
@@ -90,6 +92,8 @@ class ReviewConfig:
         cfg.max_context_tokens = int(_env("max_context_tokens", str(cfg.max_context_tokens)))
         cfg.max_tool_result_chars = int(_env("max_tool_result_chars", str(cfg.max_tool_result_chars)))
         cfg.inline_diff_chars = int(_env("inline_diff_chars", str(cfg.inline_diff_chars)))
+        cfg.include_discussion = _bool(_env("include_discussion"), True)
+        cfg.max_discussion_chars = int(_env("max_discussion_chars", str(cfg.max_discussion_chars)))
         cfg.language = _env("language", cfg.language)
         cfg.profile = _env("review_profile", cfg.profile)
         cfg.project_context = _env("project_context")
