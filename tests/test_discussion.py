@@ -33,7 +33,14 @@ ISSUE_COMMENTS = [
         "created_at": "2026-10-09T10:05:00Z",
         "body": "The following west manifest projects have changed revision...",
     },
-    {"id": 3, "user": _user("github-actions[bot]", "Bot"), "created_at": "2026-10-09T10:06:00Z", "body": "CI failed."},
+    {
+        "id": 3,
+        "user": _user("github-actions[bot]", "Bot"),
+        "created_at": "2026-10-09T10:06:00Z",
+        "body": "<!-- ccr-overview-v2 -->\n\n### Changes recommended\n\n<details open>\n<summary><strong>1 open "
+        'finding</strong></summary>\n\n- <picture><source media="(prefers-color-scheme: dark)" srcset="x.svg">'
+        '<img src="y.png" alt="Medium severity" width="62"></picture> CI failed on ' + "x" * 400,
+    },
     {
         "id": 4,
         "user": _user("zephyrbot"),
@@ -141,6 +148,11 @@ def test_digest_is_bounded_and_points_at_the_tool():
     assert "- drivers/i2c/Kconfig:19 @carol (2026-10-08) (outdated: the code moved since): Should this depend" in text
     assert "    - @author: Good catch" in text
     assert "previous automated review" in text and "Old finding about a lock." in text
+    # Bot HTML scaffolding is stripped, whitespace collapsed, and bots get a short budget.
+    bot_line = next(line for line in text.splitlines() if "github-actions[bot]" in line)
+    assert "<" not in bot_line and "ccr-overview" not in bot_line and "\n" not in bot_line
+    assert "### Changes recommended 1 open finding - CI failed on xxx" in bot_line
+    assert len(bot_line) < 320
     short = d.digest(max_chars=300)
     assert len(short) < 420 and "call `pr_discussion`" in short
     assert Discussion().digest() == ""

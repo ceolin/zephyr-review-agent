@@ -10,6 +10,7 @@ author's explanations against the code.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -142,11 +143,11 @@ class Discussion:
         if substantive:
             lines += ["", "#### Review summaries"]
             for r in substantive:
-                lines.append(f"- {r.who} [{r.state}] ({r.created[:10]}): {_clip(r.body, body_chars)}")
+                lines.append(f"- {r.who} [{r.state}] ({r.created[:10]}): {_clip(r.body, _budget(r, body_chars))}")
         if self.conversation:
             lines += ["", "#### Conversation"]
             for c in self.conversation:
-                lines.append(f"- {c.who} ({c.created[:10]}): {_clip(c.body, body_chars)}")
+                lines.append(f"- {c.who} ({c.created[:10]}): {_clip(c.body, _budget(c, body_chars))}")
         threads = self.threads()
         if threads:
             lines += ["", "#### Inline threads"]
@@ -200,6 +201,11 @@ class Discussion:
         return self.detail(path, include_outdated=bool(args.get("include_outdated", True)))
 
 
+def _budget(c: Comment, body_chars: int) -> int:
+    """Bots (CI, other reviewers) get a third of the space a person gets in the digest."""
+    return max(120, body_chars // 3) if c.is_bot else body_chars
+
+
 def _comment(kind: str, raw: dict[str, Any], created_key: str = "created_at") -> Comment:
     user = raw.get("user") or {}
     login = user.get("login") or "unknown"
@@ -214,6 +220,19 @@ def _comment(kind: str, raw: dict[str, Any], created_key: str = "created_at") ->
     )
 
 
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+_HTML_TAG = re.compile(
+    r"<(?:picture|source|img|details|summary|br|p|div|span|sub|sup|b|i|strong|em)\b[^>]*>|</\w+>", re.I
+)
+
+
+def _plain(text: str) -> str:
+    """Markdown-ish body without HTML scaffolding or layout whitespace, for one-line digests."""
+    text = _HTML_COMMENT.sub(" ", text)
+    text = _HTML_TAG.sub(" ", text)
+    return " ".join(text.split())
+
+
 def _clip(text: str, n: int) -> str:
-    text = " ".join(text.split()) if len(text) <= n else text
+    text = _plain(text)
     return text if len(text) <= n else text[: n - 3].rstrip() + "..."
