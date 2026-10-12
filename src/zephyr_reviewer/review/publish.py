@@ -47,6 +47,7 @@ def save_artifacts(out_dir: str, run: RunResult, body: str, pr: PullRequest, cfg
         "forced": run.forced,
         "seconds": round(run.seconds, 1),
         "usage": dataclasses.asdict(run.usage),
+        "stages": run.stages,
         "errors": run.errors,
         "review": run.review.to_dict() if run.review else None,
     }

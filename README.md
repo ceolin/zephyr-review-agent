@@ -128,6 +128,30 @@ nothing from the tree is executed. That is what makes it safe to run on a fork's
    comments are posted as a review when enabled, action outputs are set, and `review-output/`
    receives `comment.md`, `review.json` and `transcript.jsonl`.
 
+### Two-stage review (advanced)
+
+Investigation turns dominate cost: the whole transcript is resent on every call. Setting
+`draft_model` makes a low-cost model do that work and a stronger one finish it:
+
+```yaml
+with:
+  model: anthropic/claude-sonnet-4.5     # verifies and finalizes
+  draft_model: google/gemini-2.5-flash   # investigates and drafts
+  verify_max_steps: "15"
+```
+
+Stage 1 runs the normal review with the cheap model. Stage 2 receives the same opening message plus
+the draft review and a dossier of the evidence stage 1 gathered (deduplicated tool results, highest
+value first, within `dossier_chars`), keeps live tool access with its own smaller step budget, and
+is told to confirm, correct or drop every draft finding against the code, then spend what remains
+on the riskiest regions the draft may have missed. Only the final review is published; the comment
+footer and `review.json` record both stages' models, steps and cost. If the cheap model fails to
+submit, stage 2 runs as a full single-stage review, so the option can only cost, never degrade.
+
+Expect the saving to be large when the draft model is an order of magnitude cheaper and the
+verifier needs few steps; measure it on your own pull requests before relying on it, and watch
+the verifier's drop rate: a draft model that is wrong most of the time is not saving anything.
+
 ### Existing discussion
 
 The reviewer reads what has already been said. Before the model starts, the orchestrator fetches
@@ -190,6 +214,7 @@ upstream repository.
 | `src/zephyr_reviewer/review/openrouter.py` | Chat completions with tools, fallback routing, retries |
 | `src/zephyr_reviewer/review/agent.py` | The loop: tool calls, budgets, `submit_review` |
 | `src/zephyr_reviewer/review/schema.py` | Review schema and validation against the diff |
+| `src/zephyr_reviewer/review/stages.py` | Two-stage review: draft with a cheap model, verify with a strong one |
 | `src/zephyr_reviewer/review/discussion.py` | Existing PR comments, threads and review states; digest and `pr_discussion` tool |
 | `src/zephyr_reviewer/review/render.py`, `publish.py`, `github_api.py` | Comment rendering and delivery |
 | `src/zephyr_reviewer/cli.py` | `serve`, `review`, `tools`, `call` |

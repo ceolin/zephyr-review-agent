@@ -40,10 +40,30 @@ class RunResult:
     errors: list[str] = field(default_factory=list)
     transcript: list[dict[str, Any]] = field(default_factory=list)
     seconds: float = 0.0
+    tool_results: list[dict[str, Any]] = field(default_factory=list)  # name, arguments, content (for a later stage)
+    stages: list[dict[str, Any]] = field(default_factory=list)  # per-stage summaries when the review ran in stages
 
     @property
     def tool_call_count(self) -> int:
         return sum(1 for t in self.transcript if t.get("kind") == "tool_call" and t.get("name") != SUBMIT_TOOL_NAME)
+
+    def stage_summary(self, name: str) -> dict[str, Any]:
+        return {
+            "stage": name,
+            "models": list(self.models_used),
+            "steps": self.steps,
+            "tool_calls": self.tool_call_count,
+            "forced": self.forced,
+            "submitted": self.review is not None,
+            "seconds": round(self.seconds, 1),
+            "usage": {
+                "prompt_tokens": self.usage.prompt_tokens,
+                "completion_tokens": self.usage.completion_tokens,
+                "total_tokens": self.usage.total_tokens,
+                "cost": round(self.usage.cost, 4),
+                "requests": self.usage.requests,
+            },
+        }
 
 
 async def run_review(
@@ -71,6 +91,7 @@ async def run_review(
     rejections = 0
     last_prompt_tokens = 0
     errors: list[str] = []
+    tool_results: list[dict[str, Any]] = []
 
     for step in range(1, max_steps + 1):
         budget_out = step >= max_steps or last_prompt_tokens > max_context_tokens
@@ -122,14 +143,30 @@ async def run_review(
                     if review is not None:
                         log(f"[step {step}] review submitted: {review.verdict}, {len(review.findings)} finding(s)")
                         return RunResult(
-                            review, step, usage, models, forced, errors, transcript, time.monotonic() - started
+                            review,
+                            step,
+                            usage,
+                            models,
+                            forced,
+                            errors,
+                            transcript,
+                            time.monotonic() - started,
+                            tool_results,
                         )
                     rejections += 1
                     log(f"[step {step}] review rejected: {errs}")
                     if rejections > max_rejections:
                         errors.extend(errs)
                         return RunResult(
-                            None, step, usage, models, forced, errors, transcript, time.monotonic() - started
+                            None,
+                            step,
+                            usage,
+                            models,
+                            forced,
+                            errors,
+                            transcript,
+                            time.monotonic() - started,
+                            tool_results,
                         )
                     content = rejection_message(errs)
                 elif name in local:
@@ -142,6 +179,7 @@ async def run_review(
                     transcript.append(
                         {"kind": "tool_call", "step": step, "name": name, "arguments": args, "chars": len(content)}
                     )
+                    tool_results.append({"name": name, "arguments": args, "content": content})
                 elif name in bridge.tool_names:
                     content = await bridge.call(name, args)
                     rec = bridge.calls[-1]
@@ -159,13 +197,17 @@ async def run_review(
                             "error": rec.is_error,
                         }
                     )
+                    if not rec.is_error:
+                        tool_results.append({"name": name, "arguments": args, "content": content})
                 else:
                     available = ", ".join(sorted(bridge.tool_names | set(local)))
                     content = f"ERROR: unknown tool {name!r}. Available: {available}, {SUBMIT_TOOL_NAME}."
             messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "name": name, "content": content})
 
     errors.append(f"model did not submit a review within {max_steps} steps")
-    return RunResult(None, max_steps, usage, models, forced, errors, transcript, time.monotonic() - started)
+    return RunResult(
+        None, max_steps, usage, models, forced, errors, transcript, time.monotonic() - started, tool_results
+    )
 
 
 def _short(args: dict[str, Any], limit: int = 80) -> str:

@@ -44,6 +44,9 @@ class ReviewConfig:
     base_url: str = "https://openrouter.ai/api/v1"
     models: list[str] = field(default_factory=lambda: ["anthropic/claude-sonnet-4.5"])
     provider: dict | None = None
+    draft_models: list[str] = field(default_factory=list)  # non-empty enables the two-stage review
+    verify_max_steps: int = 15
+    dossier_chars: int = 40_000
     temperature: float = 0.1
     max_tokens: int = 8000
     max_steps: int = 40
@@ -86,6 +89,10 @@ class ReviewConfig:
         cfg.models = [m for i, m in enumerate(models) if m and m not in models[:i]]
         prov = _env("provider")
         cfg.provider = json.loads(prov) if prov.strip() else None
+        drafts = [_env("draft_model")] + _list(_env("draft_fallback_models"))
+        cfg.draft_models = [m for i, m in enumerate(drafts) if m and m not in drafts[:i]]
+        cfg.verify_max_steps = int(_env("verify_max_steps", str(cfg.verify_max_steps)))
+        cfg.dossier_chars = int(_env("dossier_chars", str(cfg.dossier_chars)))
         cfg.temperature = float(_env("temperature", str(cfg.temperature)))
         cfg.max_tokens = int(_env("max_tokens", str(cfg.max_tokens)))
         cfg.max_steps = int(_env("max_steps", str(cfg.max_steps)))
