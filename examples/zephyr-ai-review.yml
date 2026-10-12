@@ -1,0 +1,60 @@
+# Drop this into .github/workflows/ of the Zephyr repository (or a fork) to review pull requests.
+#
+# Forked pull requests get no secrets under `pull_request`, so this uses `pull_request_target`.
+# That event runs with the base repository's token and secrets, which is safe here only because
+# nothing from the pull request is executed: the checkout below is the *base* branch, the head
+# commit is fetched by SHA and read through git plumbing by the MCP server, and no script from the
+# tree is run. Keep it that way; do not add `actions/checkout` of the head ref or build steps.
+#
+# The review is gated on an `ai-review` label so that cost is opt-in while the system matures.
+# Remove `required_labels` to review every pull request.
+
+name: AI Review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out the base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 200
+          persist-credentials: false
+
+      # The action fetches the head commit and the merge base by SHA itself when they are missing,
+      # so a shallow checkout is enough. A deeper fetch-depth only improves file_history and blame.
+
+      - name: Review
+        id: review
+        uses: nashif/zephyr-reviewer@main
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: anthropic/claude-sonnet-4.5
+          fallback_models: openai/gpt-4.1,google/gemini-2.5-pro
+          provider: '{"data_collection": "deny"}'
+          required_labels: ai-review
+          post_inline_comments: "false"
+          max_steps: "40"
+
+      - name: Upload review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: review-output/
+          retention-days: 30

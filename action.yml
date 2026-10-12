@@ -1,0 +1,170 @@
+name: "Zephyr AI Review"
+description: >-
+  Reviews a Zephyr pull request with a tool-using model: a source-intelligence MCP server is
+  started on the runner, the model investigates the tree through it via OpenRouter, and the
+  findings are posted back to the pull request.
+author: "Anas Nashif"
+
+branding:
+  icon: "search"
+  color: "blue"
+
+inputs:
+  openrouter_api_key:
+    description: "OpenRouter API key. Store it as a repository secret."
+    required: true
+  github_token:
+    description: "Token used to read the pull request and post comments."
+    required: false
+    default: ${{ github.token }}
+  pr_number:
+    description: "Pull request number. Defaults to the number in the triggering event."
+    required: false
+    default: ""
+  repo_root:
+    description: "Path to the Zephyr checkout on the runner."
+    required: false
+    default: ${{ github.workspace }}
+
+  model:
+    description: "Primary OpenRouter model slug."
+    required: false
+    default: "anthropic/claude-sonnet-4.5"
+  fallback_models:
+    description: "Comma-separated OpenRouter slugs tried in order if the primary is unavailable."
+    required: false
+    default: ""
+  provider:
+    description: "OpenRouter provider routing preferences as JSON, e.g. {\"data_collection\":\"deny\"}."
+    required: false
+    default: ""
+  temperature:
+    required: false
+    default: "0.1"
+  max_tokens:
+    description: "Maximum tokens per model response."
+    required: false
+    default: "8000"
+  max_steps:
+    description: "Maximum model turns (each turn may issue several tool calls) before the review is forced."
+    required: false
+    default: "40"
+  max_context_tokens:
+    description: "Prompt size at which the review is forced to conclude."
+    required: false
+    default: "160000"
+  max_tool_result_chars:
+    description: "Size cap on each tool result handed to the model."
+    required: false
+    default: "24000"
+  inline_diff_chars:
+    description: "Diffs up to this size are included in the opening message; larger ones are fetched per file."
+    required: false
+    default: "60000"
+
+  review_profile:
+    description: "Built-in profile name (zephyr) or path to a Markdown file with your own."
+    required: false
+    default: "zephyr"
+  project_context:
+    description: "Extra maintainer guidance handed to the model."
+    required: false
+    default: ""
+  language:
+    required: false
+    default: "English"
+
+  skip_labels:
+    description: "Comma-separated labels that suppress the review."
+    required: false
+    default: "no-ai-review,skip-review"
+  required_labels:
+    description: "If set, the review only runs when the PR carries one of these labels."
+    required: false
+    default: ""
+  skip_draft:
+    required: false
+    default: "true"
+
+  post_comment:
+    description: "Post (and update in place) the summary comment."
+    required: false
+    default: "true"
+  post_inline_comments:
+    description: "Also attach anchored findings as inline review comments."
+    required: false
+    default: "false"
+  comment_tag:
+    description: "Hidden marker used to find and update the previous comment."
+    required: false
+    default: "zephyr-reviewer"
+  fail_on_severity:
+    description: "Fail the step when a finding at or above this severity stands: none, suggestion, low, medium, high, critical."
+    required: false
+    default: "none"
+  dry_run:
+    description: "Run the review and upload artifacts, but do not post to the pull request."
+    required: false
+    default: "false"
+  output_dir:
+    description: "Where comment.md, review.json and transcript.jsonl are written."
+    required: false
+    default: "review-output"
+
+outputs:
+  verdict:
+    description: "approve, comment, request_changes, skipped or error."
+    value: ${{ steps.review.outputs.verdict }}
+  findings_count:
+    value: ${{ steps.review.outputs.findings_count }}
+  highest_severity:
+    value: ${{ steps.review.outputs.highest_severity }}
+  comment_url:
+    value: ${{ steps.review.outputs.comment_url }}
+  review_url:
+    value: ${{ steps.review.outputs.review_url }}
+  skipped:
+    value: ${{ steps.review.outputs.skipped }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      with:
+        python-version: "3.12"
+
+    - name: Install zephyr-reviewer
+      shell: bash
+      run: python -m pip install --quiet "${GITHUB_ACTION_PATH}"
+
+    - name: Review
+      id: review
+      shell: bash
+      run: zephyr-reviewer review
+      env:
+        INPUT_OPENROUTER_API_KEY: ${{ inputs.openrouter_api_key }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+        INPUT_REPO_ROOT: ${{ inputs.repo_root }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_FALLBACK_MODELS: ${{ inputs.fallback_models }}
+        INPUT_PROVIDER: ${{ inputs.provider }}
+        INPUT_TEMPERATURE: ${{ inputs.temperature }}
+        INPUT_MAX_TOKENS: ${{ inputs.max_tokens }}
+        INPUT_MAX_STEPS: ${{ inputs.max_steps }}
+        INPUT_MAX_CONTEXT_TOKENS: ${{ inputs.max_context_tokens }}
+        INPUT_MAX_TOOL_RESULT_CHARS: ${{ inputs.max_tool_result_chars }}
+        INPUT_INLINE_DIFF_CHARS: ${{ inputs.inline_diff_chars }}
+        INPUT_REVIEW_PROFILE: ${{ inputs.review_profile }}
+        INPUT_PROJECT_CONTEXT: ${{ inputs.project_context }}
+        INPUT_LANGUAGE: ${{ inputs.language }}
+        INPUT_SKIP_LABELS: ${{ inputs.skip_labels }}
+        INPUT_REQUIRED_LABELS: ${{ inputs.required_labels }}
+        INPUT_SKIP_DRAFT: ${{ inputs.skip_draft }}
+        INPUT_POST_COMMENT: ${{ inputs.post_comment }}
+        INPUT_POST_INLINE_COMMENTS: ${{ inputs.post_inline_comments }}
+        INPUT_COMMENT_TAG: ${{ inputs.comment_tag }}
+        INPUT_FAIL_ON_SEVERITY: ${{ inputs.fail_on_severity }}
+        INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        INPUT_OUTPUT_DIR: ${{ inputs.output_dir }}

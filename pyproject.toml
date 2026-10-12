@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zephyr-reviewer"
+version = "0.1.0"
+description = "Source intelligence for the Zephyr tree over MCP, and an OpenRouter-backed review agent that uses it."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Anas Nashif" }]
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=2.0",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[project.scripts]
+zephyr-reviewer = "zephyr_reviewer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"zephyr_reviewer.review" = ["profiles/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
