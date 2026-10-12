@@ -127,6 +127,8 @@ def render_comment(
         out += ["### Commit messages", "", review.commit_message_assessment, ""]
     if review.discussion_assessment:
         out += ["### Existing discussion", "", review.discussion_assessment, ""]
+    if review.test_plan:
+        out += render_test_plan(review)
     cost = f" · ${run.usage.cost:.3f}" if run.usage.cost else ""
     if len(run.stages) > 1:
         how = " then ".join(
@@ -185,3 +187,26 @@ def inline_comments(review: Review) -> list[dict[str, Any]]:
             c["start_side"] = "RIGHT"
         comments.append(c)
     return comments
+
+
+PRIORITY_BADGE = {"must": "🔴 must", "should": "🟡 should", "optional": "⚪ optional"}
+
+
+def render_test_plan(review: Review) -> list[str]:
+    from .testplan import commands
+
+    out = ["### Test plan", "", "| Priority | Test | Platforms | Verifies |", "| --- | --- | --- | --- |"]
+    for e in review.test_plan:
+        test = f"`{e.suite}`" + (f"<br>`{e.scenario}`" if e.scenario else "")
+        if e.build_only:
+            test += "<br><sub>build only</sub>"
+        plats = ", ".join(f"`{p}`" for p in e.platforms) or "_suite defaults_"
+        reason = e.reason.replace("|", "\\|")
+        if e.notes:
+            reason += " <sub>⚠ " + "; ".join(e.notes).replace("|", "\\|") + "</sub>"
+        out.append(f"| {PRIORITY_BADGE.get(e.priority, e.priority)} | {test} | {plats} | {reason} |")
+    cmds = commands(review.test_plan)
+    if cmds:
+        out += ["", "<details><summary>twister commands</summary>", "", "```sh", *cmds, "```", "</details>"]
+    out.append("")
+    return out

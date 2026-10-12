@@ -181,6 +181,53 @@ BOARD_DTS = """\
 };
 """
 
+BOARD_YML = """\
+board:
+  name: vndboard
+  full_name: Vendor Board
+  vendor: vnd
+  socs:
+  - name: vndsoc
+    variants:
+    - name: ns
+      cpucluster: cpuapp
+"""
+
+NATIVE_BOARD_YML = """\
+boards:
+- name: native_sim
+  full_name: Native simulator
+  vendor: zephyr
+  socs:
+  - name: native
+    variants:
+    - name: "64"
+"""
+
+TAGS_YAML = """\
+kernel:
+  files:
+    - kernel/
+    - arch/
+i2c:
+  files:
+    - drivers/i2c/
+    - include/zephyr/drivers/i2c.h
+"""
+
+KERNEL_TESTS_YAML = """\
+common:
+  tags:
+    - kernel
+tests:
+  kernel.semaphore:
+    platform_allow:
+      - native_sim
+      - vndboard/vndsoc
+  kernel.semaphore.build:
+    build_only: true
+"""
+
 
 def _git(root: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -205,7 +252,17 @@ def mini_repo(tmp_path_factory: pytest.TempPathFactory) -> dict:
     _write(root, "drivers/i2c/Kconfig", KCONFIG_I2C_BASE)
     _write(root, "drivers/i2c/CMakeLists.txt", "zephyr_library_sources_ifdef(CONFIG_I2C_FOO i2c_foo.c)\n")
     _write(root, "dts/bindings/i2c/vnd,foo-i2c.yaml", BINDING)
-    _write(root, "boards/vnd/board/board.dts", BOARD_DTS)
+    _write(root, "boards/vnd/vndboard/vndboard_vndsoc_cpuapp.dts", BOARD_DTS)
+    _write(root, "boards/vnd/vndboard/vndboard_vndsoc_cpuapp_ns.dts", BOARD_DTS)
+    _write(root, "boards/vnd/vndboard/board.yml", BOARD_YML)
+    _write(root, "boards/native/native_sim/native_sim_native.dts", "/ { };\n")
+    _write(root, "boards/native/native_sim/native_sim_native_64.dts", "/ { };\n")
+    _write(root, "boards/native/native_sim/board.yml", NATIVE_BOARD_YML)
+    _write(root, "scripts/ci/tags.yaml", TAGS_YAML)
+    _write(root, "tests/kernel/semaphore/tests.yaml", KERNEL_TESTS_YAML)
+    _write(root, "tests/kernel/semaphore/src/main.c", "#include <zephyr/ztest.h>\n")
+    _write(root, "tests/drivers/i2c/common/helpers.h", "/* shared */\n")
+    _write(root, "tests/drivers/i2c/target/tests.yaml", "tests:\n  drivers.i2c.target:\n    tags:\n      - i2c\n")
     _write(root, "tests/drivers/i2c/foo/tests.yaml", TESTS_YAML)
     _write(root, "tests/drivers/i2c/foo/src/main.c", TEST_MAIN)
     _write(root, "tests/drivers/i2c/foo/prj.conf", "CONFIG_I2C=y\nCONFIG_I2C_FOO=y\n")

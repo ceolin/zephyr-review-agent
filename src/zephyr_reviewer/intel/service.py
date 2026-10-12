@@ -11,13 +11,33 @@ Every method returns text ready to be handed to a model, bounded in size.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import cached_property
 
 from . import devicetree, kconfig, symbols, tests_index
 from .diff import FileDiff, parse_unified_diff
 from .maintainers import Maintainers
+from .platforms import PlatformIndex
 from .repo import Commit, GitRepo
+
+_GENERIC_STEMS = {
+    "common",
+    "config",
+    "device",
+    "driver",
+    "errno",
+    "handler",
+    "helpers",
+    "kernel",
+    "shared",
+    "system",
+    "thread",
+    "timeout",
+    "timers",
+    "utils",
+    "version",
+}
 
 _GUIDELINE_FILES = {
     "agents": "AGENTS.md",
@@ -70,6 +90,14 @@ class SourceIntel:
     @cached_property
     def maintainers(self) -> Maintainers | None:
         return Maintainers.from_repo(self.base)
+
+    @cached_property
+    def tags(self) -> tests_index.Tags | None:
+        return tests_index.Tags.from_repo(self.base)
+
+    @cached_property
+    def platform_index(self) -> PlatformIndex:
+        return PlatformIndex.build(self.head)
 
     # ------------------------------------------------------------------- tools
     def overview(self) -> str:
@@ -332,6 +360,161 @@ class SourceIntel:
         if not out:
             return f"No twister suites found that reference {subject!r}."
         return self._clip("\n".join(out))
+
+    def platforms(self, fragment: str = "") -> str:
+        idx = self.platform_index
+        if not fragment.strip():
+            n_ids, n_boards = len(idx.by_identifier), len(idx.boards)
+            return f"{n_ids} platform identifiers across {n_boards} boards. Pass a fragment to filter."
+        hits = idx.search(fragment)
+        if not hits:
+            return f"No platform identifier, board name or vendor matches {fragment!r}."
+        out = []
+        for ident in hits:
+            b = idx.by_identifier[ident]
+            out.append(f"{ident}  ({b.full_name or b.name}; {b.directory})")
+        if len(hits) >= 60:
+            out.append("... narrow the fragment for more.")
+        return self._clip("\n".join(out))
+
+    def test_candidates(self) -> str:
+        """Everything a test plan for this change should consider: suites, identifiers, tags, platforms."""
+        changed = [f.path for f in self.files if f.status != "D"]
+        changed_all = [f.path for f in self.files]
+        out: list[str] = []
+        seen: set[str] = set()
+
+        def add_suite(s: tests_index.TestSuite | None) -> None:
+            if s and s.meta_path not in seen:
+                seen.add(s.meta_path)
+                out.extend(s.describe())
+
+        # 1. Suites the change edits directly.
+        owned = tests_index.changed_suite_dirs(self.head, changed)
+        out.append("## Suites changed by this pull request (run these first)")
+        if owned:
+            for d, files in sorted(owned.items()):
+                add_suite(tests_index.suite_for_dir(self.head, d, f"edits {', '.join(files[:4])}"))
+        else:
+            out.append("(none)")
+
+        # 2. MAINTAINERS test identifiers and tags for the touched areas.
+        ids: dict[str, list[str]] = {}
+        m = self.maintainers
+        if m:
+            for path in changed_all:
+                for area, _ in m.areas_for(path):
+                    if area.tests:
+                        ids.setdefault(area.name, area.tests)
+        out.append("")
+        out.append("## Test identifiers from MAINTAINERS.yml (scenario-id prefixes for the touched areas)")
+        if ids:
+            out += [f"- {name}: {', '.join(tests)}" for name, tests in sorted(ids.items())]
+        else:
+            out.append("(none)")
+        tag_names = self.tags.for_paths(changed_all) if self.tags else []
+        out.append("")
+        out.append("## Twister tags implicated (scripts/ci/tags.yaml): " + (", ".join(tag_names) or "(none)"))
+
+        # 3. Suites covering the changed source: by area directory, by tag, by symbol reference.
+        out.append("")
+        out.append("## Suites covering the changed source")
+        before = len(seen)
+        tops: set[str] = set()
+        stems: set[str] = set()
+        for path in changed:
+            if path.startswith(("tests/", "samples/", "doc/", "boards/", ".github/")):
+                continue
+            parts = path.split("/")
+            dirs = parts[:-1]
+            stem = parts[-1].rsplit(".", 1)[0]
+            if dirs and dirs[0] == "kernel":
+                tops.add("tests/kernel")
+            elif dirs and dirs[0] in ("drivers", "subsys", "lib", "arch"):
+                tops.add("tests/" + "/".join(dirs[:2]))
+            elif len(dirs) >= 3 and dirs[0] == "include" and dirs[1] == "zephyr":
+                # include/zephyr/<area>/<name>.h -> tests/<area>/<name>, else tests/<area>/<sub>
+                area = dirs[2:4] if len(dirs) > 3 else [dirs[2], stem]
+                cand = "tests/" + "/".join(area)
+                tops.add(cand if self.head.is_dir(cand) else "tests/" + dirs[2])
+            if path.endswith((".c", ".h")) and len(stem) >= 6 and stem.lower() not in _GENERIC_STEMS:
+                stems.add(stem)
+        for top in sorted(tops):
+            for s in tests_index.suites_under(self.head, top, limit=12):
+                add_suite(s)
+        for s in tests_index.suites_with_tags(self.head, tag_names, limit=20):
+            add_suite(s)
+        for stem in sorted(stems)[:8]:
+            for s in tests_index.suites_referencing(self.head, stem, limit=5):
+                add_suite(s)
+        if len(seen) == before:
+            out.append("(none found; use related_tests and list_files tests/** to look further)")
+
+        # 4. Platforms implicated by the change.
+        out.append("")
+        out.append("## Platforms implicated by the change")
+        idx = self.platform_index
+        board_idents: dict[str, list[str]] = {}
+        for path in changed_all:
+            if path.startswith("boards/"):
+                idents = idx.for_path(path)
+                if idents:
+                    board_idents.setdefault(path.rsplit("/", 1)[0], idents)
+        if board_idents:
+            for d, idents in sorted(board_idents.items()):
+                out.append(f"- board changed, {d}: " + ", ".join(idents))
+        compat_boards: dict[str, set[str]] = {}
+        for path in changed:
+            if path.startswith("drivers/") and path.endswith(".c"):
+                text = self.head.show(path, max_bytes=200_000) or ""
+                for mm in re.finditer(r"^\s*#\s*define\s+DT_DRV_COMPAT\s+(\w+)", text, re.M):
+                    drv = mm.group(1)
+                    compats = self._compatibles_for_drv(drv)
+                    for compat in compats:
+                        users = devicetree.compatible_users(self.head, compat, max_results=400)
+                        for p, _ln, _t in users["devicetree"]:
+                            if p.startswith("boards/"):
+                                compat_boards.setdefault(compat, set()).update(idx.for_path(p))
+                            else:
+                                compat_boards.setdefault(compat, set()).add(f"(dtsi: {p})")
+        for compat, idents in sorted(compat_boards.items()):
+            boards = sorted(i for i in idents if not i.startswith("(dtsi"))
+            dtsis = sorted(i for i in idents if i.startswith("(dtsi"))
+            line = f"- devicetree nodes with compatible {compat}: " + (", ".join(boards[:25]) or "no board DTS")
+            if len(boards) > 25:
+                line += f" (+{len(boards) - 25} more)"
+            if dtsis:
+                line += "; also in SoC/shield dtsi: " + ", ".join(d[7:-1] for d in dtsis[:6])
+            out.append(line)
+        archs = sorted({p.split("/")[1] for p in changed_all if p.startswith("arch/") and p.count("/") >= 2})
+        if archs:
+            out.append("- architectures touched: " + ", ".join(archs) + " (pick emulation platforms for each)")
+        socs = sorted({"/".join(p.split("/")[1:3]) for p in changed_all if p.startswith("soc/") and p.count("/") >= 2})
+        if socs:
+            out.append("- SoC families touched: " + ", ".join(socs) + " (use list_platforms to find their boards)")
+        if not (board_idents or compat_boards or archs or socs):
+            out.append("(no board, SoC, arch or driver-binding change; prefer each suite's integration_platforms)")
+        out.append("")
+        out.append(
+            "Scenario ids are '<path>/<scenario>' for twister -s; validate platform identifiers with list_platforms."
+        )
+        return self._clip("\n".join(out))
+
+    def _compatibles_for_drv(self, drv_compat: str) -> list[str]:
+        """vnd_foo_i2c -> ['vnd,foo-i2c'] by matching binding compatibles."""
+        pattern = re.escape(drv_compat).replace("_", "[,_-]")
+        hits, _ = self.head.grep(
+            rf'^[[:space:]]*compatible:[[:space:]]*"{pattern}"',
+            paths="dts/bindings/**/*.y*ml",
+            regex=True,
+            max_results=20,
+        )
+        out: list[str] = []
+        for h in hits:
+            m = re.search(r'compatible:\s*"([^"]+)"', h.text)
+            if m and m.group(1).replace(",", "_").replace("-", "_") == drv_compat and m.group(1) not in out:
+                out.append(m.group(1))
+        return out
 
     def guidelines(self, topic: str = "agents") -> str:
         key = topic.strip().lower()

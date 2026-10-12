@@ -71,6 +71,7 @@ def opening_message(
     project_context: str,
     repo: str,
     discussion: str | None = None,
+    test_plan: bool = False,
 ) -> str:
     parts = [
         f"## Pull request #{pr.number}: {pr.title}" if pr.number else f"## Change under review: {pr.title}",
@@ -89,8 +90,29 @@ def opening_message(
         parts += ["", "### Full diff", "```diff", diff, "```"]
     else:
         parts += ["", "The diff is too large to include here; use `file_diff` per file."]
+    if test_plan:
+        parts += ["", "### Test plan requested", TEST_PLAN_REQUEST]
     parts += ["", f"Investigate with the tools, then call `{SUBMIT_TOOL_NAME}`."]
     return "\n".join(p for p in parts if p is not None)
+
+
+TEST_PLAN_REQUEST = """\
+Besides the review, produce a `test_plan`: the twister runs that would exercise this change, with
+platform coverage that matches what changed.
+
+- Start from `test_candidates`: suites the PR edits, MAINTAINERS test identifiers, implicated tags,
+  suites covering the changed source, and the platforms implicated by changed boards, SoCs,
+  architectures and driver bindings. Read a suite's tests.yaml with `read_file` when you need
+  scenario details.
+- `suite` is the suite directory; `scenario` is one id from its tests.yaml (exact spelling), or empty
+  for the whole suite. Use `list_platforms` to confirm every platform identifier you name.
+- Cover the change, not the world: the platforms whose DTS instantiates a changed driver's compatible,
+  the changed board itself, one emulation platform per touched architecture (native_sim, qemu_*),
+  and the suite's own integration_platforms. Respect platform_allow and arch_allow.
+- Mark `build_only` when compiling is the point (Kconfig, build system, board definitions).
+- `must`: without it the change is unverified; `should`: covers a real risk; `optional`: breadth.
+- At most 15 entries, most important first. Explain in `reason` what each run verifies.\
+"""
 
 
 NUDGE = (

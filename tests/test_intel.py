@@ -133,7 +133,7 @@ def test_dt_binding_and_users(intel: SourceIntel):
     text = intel.dt_binding("vnd,foo-i2c")
     assert "## dts/bindings/i2c/vnd,foo-i2c.yaml" in text and "clock-frequency" in text
     assert "drivers/i2c/i2c_foo.c:2: #define DT_DRV_COMPAT vnd_foo_i2c" in text
-    assert "boards/vnd/board/board.dts:3" in text
+    assert "boards/vnd/vndboard/vndboard_vndsoc_cpuapp.dts:3" in text
     assert "Binding files with a matching name" in intel.dt_binding("foo-i2c")
     assert "No binding" in intel.dt_binding("acme,none")
 

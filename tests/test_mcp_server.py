@@ -30,6 +30,8 @@ EXPECTED_TOOLS = {
     "file_history",
     "blame",
     "project_guidelines",
+    "test_candidates",
+    "list_platforms",
 }
 
 

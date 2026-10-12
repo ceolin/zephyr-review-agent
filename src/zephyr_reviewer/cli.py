@@ -14,6 +14,7 @@ import sys
 from . import mcp_server
 from .intel import SourceIntel
 from .review import publish as pub
+from .review import testplan
 from .review.agent import LocalTool, run_review
 from .review.config import ReviewConfig
 from .review.discussion import PR_DISCUSSION_TOOL, Discussion
@@ -48,6 +49,7 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--project-context", help="Extra guidance for the model")
     p.add_argument("--max-steps", type=int)
     p.add_argument("--max-context-tokens", type=int)
+    p.add_argument("--test-plan", action="store_true", help="Also produce a test plan: suites, scenarios, platforms")
     p.add_argument("--inline", action="store_true", help="Also post findings as inline review comments")
     p.add_argument("--no-comment", action="store_true", help="Do not post or update the summary comment")
     p.add_argument("--fail-on-severity", choices=["none", "suggestion", "low", "medium", "high", "critical"])
@@ -93,6 +95,8 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         ]
     if args.verify_max_steps is not None:
         cfg.verify_max_steps = args.verify_max_steps
+    if args.test_plan:
+        cfg.generate_test_plan = True
     if args.inline:
         cfg.post_inline = True
     if args.no_comment:
@@ -193,7 +197,7 @@ async def _run(cfg: ReviewConfig, pr: PullRequest, intel: SourceIntel, discussio
     overview = intel.overview()
     diff = intel.diff_text if len(intel.diff_text) <= cfg.inline_diff_chars else None
     digest = discussion.digest(cfg.max_discussion_chars) if discussion else None
-    opening = opening_message(pr, overview, diff, cfg.project_context, cfg.repo_slug, digest)
+    opening = opening_message(pr, overview, diff, cfg.project_context, cfg.repo_slug, digest, cfg.generate_test_plan)
     extra_tools = [LocalTool(PR_DISCUSSION_TOOL, discussion.tool_handler)] if discussion else []
     changed = {f.path: f.new_side_lines for f in intel.files}
     llm = OpenRouter(
@@ -268,6 +272,10 @@ def cmd_review(args: argparse.Namespace) -> int:
         return 0
     log(f"reviewing {len(intel.files)} file(s), {len(intel.commits)} commit(s): {cfg.base[:12]}..{cfg.head[:12]}")
     run = asyncio.run(_run(cfg, pr, intel, _load_discussion(cfg, gh, pr)))
+    if run.review is not None and run.review.test_plan:
+        testplan.annotate(run.review, intel)
+        flagged = sum(1 for e in run.review.test_plan if e.notes)
+        log(f"test plan: {len(run.review.test_plan)} entries, {flagged} flagged by validation")
     if run.review is not None:
         body = render_comment(run.review, run, pr, repo=cfg.repo_slug, tag=cfg.comment_tag, api_url=cfg.github_api_url)
     else:

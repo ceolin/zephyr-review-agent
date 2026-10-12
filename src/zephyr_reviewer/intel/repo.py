@@ -143,6 +143,37 @@ class GitRepo:
             return None  # binary
         return data.decode("utf-8", errors="replace")
 
+    def show_many(self, paths: list[str], max_bytes_each: int = 400_000) -> dict[str, str]:
+        """Contents of many files in one ``git cat-file --batch`` round trip (binary and missing files skipped)."""
+        if not paths:
+            return {}
+        proc = subprocess.Popen(
+            ["git", "-C", str(self.root), "cat-file", "--batch"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        assert proc.stdin is not None and proc.stdout is not None
+        request = "".join(f"{self.sha}:{p}\n" for p in paths).encode()
+        out, _ = proc.communicate(request)
+        result: dict[str, str] = {}
+        pos = 0
+        for path in paths:
+            nl = out.find(b"\n", pos)
+            if nl == -1:
+                break
+            header = out[pos:nl].decode(errors="replace").split()
+            pos = nl + 1
+            if len(header) < 3:  # "<sha>:<path> missing"
+                continue
+            size = int(header[2])
+            data = out[pos : pos + size]
+            pos += size + 1  # trailing newline after the object
+            if b"\0" in data[:8000] or len(data) > max_bytes_each:
+                continue
+            result[path] = data.decode("utf-8", errors="replace")
+        return result
+
     # ---------------------------------------------------------------------- grep
     def grep(
         self,

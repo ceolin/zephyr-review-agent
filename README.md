@@ -99,6 +99,7 @@ zephyr-reviewer serve --repo ~/zephyrproject/zephyr --base upstream/main --trans
 | `dt_binding` | Binding YAML for a compatible, the drivers that bind to it, the nodes that use it |
 | `maintainers` | MAINTAINERS.yml areas, with get_maintainer.py's matching rules, read from the trusted base commit |
 | `related_tests` | twister suites (tests.yaml / sample.yaml) covering a path or mentioning a symbol |
+| `test_candidates` / `list_platforms` | Suites, scenarios, tags and platforms implicated by the change; valid platform identifiers |
 | `file_history` / `blame` | Recent commits and blame for a range |
 | `project_guidelines` | AGENTS.md and the doc/contribute pages by topic |
 
@@ -127,6 +128,24 @@ nothing from the tree is executed. That is what makes it safe to run on a fork's
 6. The comment is rendered and upserted (one comment per PR, found by a hidden marker), inline
    comments are posted as a review when enabled, action outputs are set, and `review-output/`
    receives `comment.md`, `review.json` and `transcript.jsonl`.
+
+### Test plan (option)
+
+With `generate_test_plan: "true"` (or `--test-plan`), the review also proposes the twister runs
+that would exercise the change, with platform coverage that matches what changed. The model works
+from a `test_candidates` tool that reimplements the signals Zephyr's own `scripts/ci/test_plan.py`
+uses, without executing anything from the tree: suites the PR edits (including the `common`
+directory rule), MAINTAINERS `tests:` identifiers, tags from `scripts/ci/tags.yaml`, suites
+covering the changed source, and the platforms implicated by changed boards (via board.yml and
+DTS file names), SoCs, architectures and the boards whose devicetree instantiates a changed
+driver's compatible. A `list_platforms` tool gives valid platform identifiers.
+
+Each entry names a suite, optionally one scenario, platforms, a priority and what the run
+verifies. Before publishing, the plan is checked against the tree: unknown suites, misspelled
+scenarios (with the closest match suggested), unknown platform identifiers, and platforms a suite's
+`platform_allow` or `platform_exclude` rules out are flagged in the comment. The comment carries a
+table and ready-to-run `west twister` commands; `review-output/test_plan.yaml` holds the same plan
+for automation.
 
 ### Two-stage review (advanced)
 
@@ -207,13 +226,14 @@ upstream repository.
 | `src/zephyr_reviewer/intel/repo.py` | Read-only git access pinned to a commit |
 | `src/zephyr_reviewer/intel/diff.py` | Unified diff parsing, new-side line sets |
 | `src/zephyr_reviewer/intel/symbols.py` | Definition and reference heuristics for C, Kconfig, DT, CMake |
-| `src/zephyr_reviewer/intel/kconfig.py`, `devicetree.py`, `maintainers.py`, `tests_index.py` | Domain lookups |
+| `src/zephyr_reviewer/intel/kconfig.py`, `devicetree.py`, `maintainers.py`, `tests_index.py`, `platforms.py` | Domain lookups |
 | `src/zephyr_reviewer/intel/service.py` | `SourceIntel`: the facade the tools are written against |
 | `src/zephyr_reviewer/mcp_server.py` | The MCP server (stdio or streamable HTTP) |
 | `src/zephyr_reviewer/review/mcp_client.py` | Spawns or connects to the server; tool schemas for the model |
 | `src/zephyr_reviewer/review/openrouter.py` | Chat completions with tools, fallback routing, retries |
 | `src/zephyr_reviewer/review/agent.py` | The loop: tool calls, budgets, `submit_review` |
 | `src/zephyr_reviewer/review/schema.py` | Review schema and validation against the diff |
+| `src/zephyr_reviewer/review/testplan.py` | Validates a proposed test plan against suites, scenarios and platforms |
 | `src/zephyr_reviewer/review/stages.py` | Two-stage review: draft with a cheap model, verify with a strong one |
 | `src/zephyr_reviewer/review/discussion.py` | Existing PR comments, threads and review states; digest and `pr_discussion` tool |
 | `src/zephyr_reviewer/review/render.py`, `publish.py`, `github_api.py` | Comment rendering and delivery |

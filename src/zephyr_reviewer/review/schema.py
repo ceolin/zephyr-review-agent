@@ -25,6 +25,7 @@ CATEGORIES = [
     "maintainability",
 ]
 VERDICTS = ["approve", "comment", "request_changes"]
+PRIORITIES = ["must", "should", "optional"]
 CONFIDENCES = ["high", "medium", "low"]
 
 SUBMIT_TOOL_NAME = "submit_review"
@@ -116,6 +117,35 @@ SUBMIT_REVIEW_TOOL: dict[str, Any] = {
                     "behavior is not, and whether tests are required before merge. Empty when the "
                     "change needs no tests.",
                 },
+                "test_plan": {
+                    "type": "array",
+                    "description": "Only when a test plan was requested: the twister runs that would exercise this "
+                    "change, most important first. At most 15 entries.",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["suite", "platforms", "reason", "priority"],
+                        "properties": {
+                            "suite": {
+                                "type": "string",
+                                "description": "Suite directory, e.g. tests/drivers/i2c/i2c_api.",
+                            },
+                            "scenario": {
+                                "type": "string",
+                                "description": "One scenario id from that suite's "
+                                "tests.yaml, or empty for the whole suite.",
+                            },
+                            "platforms": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Platform identifiers as list_platforms reports them.",
+                            },
+                            "reason": {"type": "string", "description": "What this run verifies about the change."},
+                            "priority": {"type": "string", "enum": PRIORITIES},
+                            "build_only": {"type": "boolean", "description": "True when building is enough."},
+                        },
+                    },
+                },
                 "discussion_assessment": {
                     "type": "string",
                     "description": "How the existing review discussion stands against the current head: which "
@@ -154,6 +184,23 @@ class Finding:
 
 
 @dataclass
+class TestPlanEntry:
+    suite: str
+    scenario: str
+    platforms: list[str]
+    reason: str
+    priority: str
+    build_only: bool = False
+    notes: list[str] = field(default_factory=list)  # validation outcomes, filled by review.testplan
+
+    def twister(self) -> str:
+        target = f"-s {self.suite}/{self.scenario}" if self.scenario else f"-T {self.suite}"
+        plats = " ".join(f"-p {p}" for p in self.platforms)
+        flags = " --build-only" if self.build_only else ""
+        return f"west twister -v --inline-logs{flags} {target} {plats}".rstrip()
+
+
+@dataclass
 class Review:
     summary: str
     verdict: str
@@ -162,6 +209,7 @@ class Review:
     test_assessment: str = ""
     commit_message_assessment: str = ""
     discussion_assessment: str = ""
+    test_plan: list[TestPlanEntry] = field(default_factory=list)
 
     def highest_severity(self) -> str:
         for sev in SEVERITIES:
@@ -257,6 +305,37 @@ def parse_review(args: dict[str, Any], changed_lines: dict[str, set[int]]) -> tu
                 f.notes.append(f"line {f.line} is not on the new side of the diff; shown in the summary only")
         findings.append(f)
 
+    plan: list[TestPlanEntry] = []
+    raw_plan = args.get("test_plan") or []
+    if not isinstance(raw_plan, list):
+        errors.append("test_plan must be an array")
+        raw_plan = []
+    for i, rp in enumerate(raw_plan[:15]):
+        if not isinstance(rp, dict):
+            errors.append(f"test_plan[{i}] must be an object")
+            continue
+        suite = str(rp.get("suite") or "").strip().strip("/")
+        if not suite:
+            errors.append(f"test_plan[{i}] needs a suite directory")
+            continue
+        scenario = str(rp.get("scenario") or "").strip()
+        if scenario.startswith(suite + "/"):
+            scenario = scenario[len(suite) + 1 :]
+        plats_raw = rp.get("platforms") or []
+        if isinstance(plats_raw, str):
+            plats_raw = plats_raw.replace(",", " ").split()
+        plats = [str(x).strip() for x in plats_raw if str(x).strip()]
+        plan.append(
+            TestPlanEntry(
+                suite=suite,
+                scenario=scenario,
+                platforms=list(dict.fromkeys(plats)),
+                reason=str(rp.get("reason") or "").strip(),
+                priority=_norm_enum(rp.get("priority"), PRIORITIES, "should"),
+                build_only=bool(rp.get("build_only", False)),
+            )
+        )
+
     if errors:
         return None, errors
     review = Review(
@@ -267,5 +346,6 @@ def parse_review(args: dict[str, Any], changed_lines: dict[str, set[int]]) -> tu
         test_assessment=str(args.get("test_assessment") or "").strip(),
         commit_message_assessment=str(args.get("commit_message_assessment") or "").strip(),
         discussion_assessment=str(args.get("discussion_assessment") or "").strip(),
+        test_plan=plan,
     )
     return review, []

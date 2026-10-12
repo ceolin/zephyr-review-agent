@@ -80,6 +80,13 @@ inputs:
     required: false
     default: "60000"
 
+  generate_test_plan:
+    description: >-
+      Also produce a test plan: the twister suites and scenarios that exercise the change, with
+      platform coverage derived from changed boards, SoCs, architectures and driver bindings.
+      Rendered in the comment and written to <output_dir>/test_plan.yaml.
+    required: false
+    default: "false"
   include_discussion:
     description: "Give the model the existing conversation, inline review threads and review states."
     required: false
@@ -146,6 +153,9 @@ outputs:
     value: ${{ steps.review.outputs.findings_count }}
   highest_severity:
     value: ${{ steps.review.outputs.highest_severity }}
+  test_plan_count:
+    description: "Number of test plan entries, when a test plan was requested."
+    value: ${{ steps.review.outputs.test_plan_count }}
   comment_url:
     value: ${{ steps.review.outputs.comment_url }}
   review_url:
@@ -187,6 +197,7 @@ runs:
         INPUT_MAX_CONTEXT_TOKENS: ${{ inputs.max_context_tokens }}
         INPUT_MAX_TOOL_RESULT_CHARS: ${{ inputs.max_tool_result_chars }}
         INPUT_INLINE_DIFF_CHARS: ${{ inputs.inline_diff_chars }}
+        INPUT_GENERATE_TEST_PLAN: ${{ inputs.generate_test_plan }}
         INPUT_INCLUDE_DISCUSSION: ${{ inputs.include_discussion }}
         INPUT_MAX_DISCUSSION_CHARS: ${{ inputs.max_discussion_chars }}
         INPUT_REVIEW_PROFILE: ${{ inputs.review_profile }}

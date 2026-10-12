@@ -120,6 +120,20 @@ def build_server(intel: SourceIntel, name: str = "zephyr-source-intel") -> MCPSe
         return guard(intel.related_tests, path_or_symbol)
 
     @srv.tool()
+    def test_candidates() -> str:
+        """Everything a test plan for this change should consider: suites the PR edits, MAINTAINERS test
+        identifiers, implicated twister tags, suites covering the changed source (with scenarios, tags,
+        integration_platforms, platform_allow), and the platforms implicated by changed boards, SoCs,
+        architectures and driver bindings."""
+        return guard(intel.test_candidates)
+
+    @srv.tool()
+    def list_platforms(fragment: str) -> str:
+        """Valid twister platform identifiers (board/soc[/qualifiers]) whose name, board or vendor contains
+        the fragment, e.g. 'nrf5340', 'qemu', 'native', 'stm32h7'. Use it to validate a test plan."""
+        return guard(intel.platforms, fragment)
+
+    @srv.tool()
     def file_history(path: str, count: int = 10) -> str:
         """Recent commits touching a path at the head commit."""
         return guard(intel.history, path, count)

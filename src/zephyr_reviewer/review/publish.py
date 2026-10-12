@@ -52,6 +52,10 @@ def save_artifacts(out_dir: str, run: RunResult, body: str, pr: PullRequest, cfg
         "review": run.review.to_dict() if run.review else None,
     }
     (d / "review.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    if run.review is not None and run.review.test_plan:
+        from .testplan import to_yaml
+
+        (d / "test_plan.yaml").write_text(to_yaml(run.review, pr.head_sha), encoding="utf-8")
     with (d / "transcript.jsonl").open("w", encoding="utf-8") as fh:
         for entry in run.transcript:
             fh.write(json.dumps(entry) + "\n")
@@ -74,6 +78,7 @@ def publish(
         "verdict": run.review.verdict if run.review else "error",
         "findings_count": len(run.review.findings) if run.review else 0,
         "highest_severity": run.review.highest_severity() if run.review else "none",
+        "test_plan_count": len(run.review.test_plan) if run.review else 0,
         "comment_url": "",
         "review_url": "",
         "skipped": "false",
