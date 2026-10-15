@@ -99,6 +99,70 @@ class SourceIntel:
     def platform_index(self) -> PlatformIndex:
         return PlatformIndex.build(self.head)
 
+    # --------------------------------------------------------- structured views
+    def overview_data(self) -> dict:
+        return {
+            "base_sha": self.base_sha,
+            "head_sha": self.head.sha,
+            "shallow": self.head.is_shallow(),
+            "commits": [{"sha": c.sha, "author": c.author, "subject": c.subject} for c in self.commits],
+            "files": [
+                {
+                    "path": f.path,
+                    "status": f.status,
+                    "old_path": f.old_path if f.status == "R" else None,
+                    "additions": f.additions,
+                    "deletions": f.deletions,
+                    "binary": f.binary,
+                    "areas": self._area_names(f.path),
+                }
+                for f in self.files
+            ],
+        }
+
+    def maintainers_data(self, path: str) -> dict:
+        m = self.maintainers
+        areas = []
+        if m is not None:
+            for area, groups in m.areas_for(path, is_dir=self.head.is_dir(path)):
+                areas.append(
+                    {
+                        "name": area.name,
+                        "status": area.status,
+                        "maintainers": list(area.maintainers),
+                        "collaborators": list(area.collaborators),
+                        "labels": list(area.labels),
+                        "tests": list(area.tests),
+                        "file_groups": [{"name": g.name, "collaborators": list(g.collaborators)} for g in groups],
+                    }
+                )
+        return {"path": path, "areas": areas}
+
+    def platforms_data(self, fragment: str) -> dict:
+        idx = self.platform_index
+        hits = idx.search(fragment) if fragment.strip() else []
+        return {
+            "total_identifiers": len(idx.by_identifier),
+            "total_boards": len(idx.boards),
+            "fragment": fragment,
+            "platforms": [
+                {
+                    "identifier": i,
+                    "board": idx.by_identifier[i].name,
+                    "full_name": idx.by_identifier[i].full_name,
+                    "directory": idx.by_identifier[i].directory,
+                }
+                for i in hits
+            ],
+        }
+
+    def definition_data(self, name: str, path: str | None = None) -> dict:
+        defs = symbols.find_definitions(self.head, name, paths=path)
+        return {
+            "name": name,
+            "definitions": [{"kind": d.kind, "path": d.path, "line": d.line, "text": d.text[:200]} for d in defs],
+        }
+
     # ------------------------------------------------------------------- tools
     def overview(self) -> str:
         out = [

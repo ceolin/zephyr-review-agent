@@ -72,9 +72,10 @@ class GitHub:
         }
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        self._client = client or httpx.Client(timeout=60.0, headers=headers)
+        self._client = client or httpx.Client(timeout=60.0, headers=headers, follow_redirects=True)
         if client is not None:
             self._client.headers.update(headers)
+        self._permissions: dict[str, str] = {}
 
     def _request(self, method: str, path: str, *, json_body: Any = None, params: dict | None = None) -> httpx.Response:
         url = path if path.startswith("http") else f"{self.api_url}{path}"
@@ -122,6 +123,93 @@ class GitHub:
 
     def reviews(self, number: int) -> list[dict[str, Any]]:
         return self._paginate(f"/repos/{self.repo}/pulls/{number}/reviews")
+
+    # ------------------------------------------------------------------ CI
+    def check_runs(self, sha: str) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        page = 1
+        while page <= 10:
+            data = self._request(
+                "GET", f"/repos/{self.repo}/commits/{sha}/check-runs", params={"per_page": 100, "page": page}
+            ).json()
+            runs = data.get("check_runs") or []
+            out.extend(runs)
+            if len(runs) < 100:
+                break
+            page += 1
+        return out
+
+    def commit_statuses(self, sha: str) -> list[dict[str, Any]]:
+        data = self._request("GET", f"/repos/{self.repo}/commits/{sha}/status").json()
+        return list(data.get("statuses") or [])
+
+    def job_logs(self, job_id: int, max_bytes: int = 2_000_000) -> str:
+        resp = self._request("GET", f"/repos/{self.repo}/actions/jobs/{job_id}/logs")
+        return resp.content[:max_bytes].decode("utf-8", errors="replace")
+
+    # ----------------------------------------------------------- trust
+    def permission(self, login: str) -> str:
+        """Repository permission of a user: admin, maintain, write, triage, read, none, or unknown."""
+        if login in self._permissions:
+            return self._permissions[login]
+        try:
+            data = self._request("GET", f"/repos/{self.repo}/collaborators/{login}/permission").json()
+            perm = str(data.get("permission") or "none")
+        except GitHubError:
+            perm = "unknown"
+        self._permissions[login] = perm
+        return perm
+
+    # --------------------------------------------------------- GraphQL
+    def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        url = (
+            self.api_url.replace("/api/v3", "") + "/graphql"
+            if "/api/v3" in self.api_url
+            else self.api_url.rstrip("/") + "/graphql"
+        )
+        data = self._request("POST", url, json_body={"query": query, "variables": variables}).json()
+        if data.get("errors"):
+            raise GitHubError(f"graphql: {data['errors'][0].get('message', data['errors'])}")
+        return data.get("data") or {}
+
+    def review_threads(self, number: int) -> list[dict[str, Any]]:
+        """Review threads with resolution state: [{id, isResolved, isOutdated, path, line, comment_ids}]."""
+        owner, name = self.repo.split("/", 1)
+        query = """
+query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved isOutdated path line
+          comments(first: 100) { nodes { databaseId } }
+        }
+      }
+    }
+  }
+}"""
+        threads: list[dict[str, Any]] = []
+        after: str | None = None
+        for _ in range(20):
+            data = self.graphql(query, {"owner": owner, "name": name, "number": number, "after": after})
+            conn = ((data.get("repository") or {}).get("pullRequest") or {}).get("reviewThreads") or {}
+            for node in conn.get("nodes") or []:
+                threads.append(
+                    {
+                        "id": node.get("id"),
+                        "isResolved": bool(node.get("isResolved")),
+                        "isOutdated": bool(node.get("isOutdated")),
+                        "path": node.get("path"),
+                        "line": node.get("line"),
+                        "comment_ids": [c.get("databaseId") for c in (node.get("comments") or {}).get("nodes") or []],
+                    }
+                )
+            info = conn.get("pageInfo") or {}
+            if not info.get("hasNextPage"):
+                break
+            after = info.get("endCursor")
+        return threads
 
     def find_comment(self, number: int, marker: str) -> dict[str, Any] | None:
         for c in self.issue_comments(number):

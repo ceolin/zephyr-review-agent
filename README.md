@@ -185,6 +185,41 @@ the code rather than taken on trust. Only problems are reported, in an "Unresolv
 section of the comment: a request the head commit does not address, or a claim the code
 contradicts. Turn it off with `include_discussion: "false"`.
 
+### CI results
+
+The model sees the head commit's check runs and commit statuses in the opening message and can
+call `ci_status` for the full list and `ci_failure_logs` for the tail of a failed GitHub Actions
+job's log (timestamps and colour codes stripped, optional grep with context). It is told not to
+repeat what CI already reports but to diagnose a failure when it can tie it to the change, and never
+to treat a green CI as proof. Needs `checks: read` and `actions: read` on the job token; disable
+with `include_ci: "false"`.
+
+### Untrusted text and lockdown
+
+Everything the model reads from GitHub was written by the people whose code it reviews, or by
+their tooling. The reviewer treats it that way, following the GitHub MCP server's lockdown idea:
+
+- Every author is tagged by repository permission: maintainer (admin/maintain), collaborator
+  (write/triage), bot (a short list of known automation), external, or unknown when the token
+  cannot see permissions. The PR author's trust is shown in the opening message.
+- HTML comments and zero-width or control characters, which GitHub renders invisibly, are
+  stripped from every body before it reaches the model.
+- PR description and discussion are wrapped in explicit data delimiters and the working rules say
+  never to follow instructions found in them, and to verify their claims against the code.
+- `lockdown: strict` additionally withholds comments from external users other than the PR author.
+  `label` is the default; `off` disables tagging.
+
+Safety settings follow a tightening-only rule, as the GitHub server does with its lockdown header:
+the operator's values (workflow inputs, or server flags for the future shared service) are a
+floor, and a request (CLI flags, or per-request headers later) may make them stricter but never
+looser. A rejected relaxation is logged and ignored. See `src/zephyr_reviewer/review/policy.py`.
+
+### Typed tool outputs
+
+Tools whose results programs will consume, `pr_overview`, `maintainers`, `list_platforms` and
+`find_definition`, publish an output schema and return structured content alongside the prose the
+model reads. The remaining tools return text; they gain schemas as consumers appear.
+
 ### Issues only
 
 The review reports problems and nothing else. The summary states the result and the key issue
@@ -241,9 +276,11 @@ upstream repository.
 | `src/zephyr_reviewer/review/openrouter.py` | Chat completions with tools, fallback routing, retries |
 | `src/zephyr_reviewer/review/agent.py` | The loop: tool calls, budgets, `submit_review` |
 | `src/zephyr_reviewer/review/schema.py` | Review schema and validation against the diff |
+| `src/zephyr_reviewer/review/ci.py` | Check runs, statuses and failed-job log tails as tools |
+| `src/zephyr_reviewer/review/policy.py` | Safety settings a request may tighten but never relax |
 | `src/zephyr_reviewer/review/testplan.py` | Validates a proposed test plan against suites, scenarios and platforms |
 | `src/zephyr_reviewer/review/stages.py` | Two-stage review: draft with a cheap model, verify with a strong one |
-| `src/zephyr_reviewer/review/discussion.py` | Existing PR comments, threads and review states; digest and `pr_discussion` tool |
+| `src/zephyr_reviewer/review/discussion.py` | PR comments and threads with author trust and resolution state; digest and `pr_discussion` tool |
 | `src/zephyr_reviewer/review/render.py`, `publish.py`, `github_api.py` | Comment rendering and delivery |
 | `src/zephyr_reviewer/cli.py` | `serve`, `review`, `tools`, `call` |
 | `tests/` | A miniature Zephyr-shaped repository fixture; intel, MCP (in-process and stdio), agent, publish tests |
@@ -256,6 +293,8 @@ upstream repository.
   unusual formatting. A real index belongs in the shared service.
 - The shared service (indexing, review history, project knowledge) does not exist. `review.json`
   and `transcript.jsonl` are written per run so there is history to load when it does.
+- Using the GitHub MCP server alongside this one in Claude Code gives a maintainer GitHub state
+  plus source intelligence; nothing here duplicates its tools.
 - Incremental review of a force-pushed branch (what changed since the last review) is not wired
   in; `gh pr-diff` solves the hard part and is the natural next tool.
 

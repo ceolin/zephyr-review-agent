@@ -18,6 +18,8 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  checks: read      # ci_status: check runs on the head commit
+  actions: read     # ci_failure_logs: failed job logs
 
 concurrency:
   group: ai-review-${{ github.event.pull_request.number }}

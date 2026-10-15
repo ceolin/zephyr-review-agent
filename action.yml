@@ -87,6 +87,18 @@ inputs:
       Rendered in the comment and written to <output_dir>/test_plan.yaml.
     required: false
     default: "false"
+  include_ci:
+    description: "Give the model the head commit's check runs and a tool to read failed job logs (needs actions: read)."
+    required: false
+    default: "true"
+  lockdown:
+    description: >-
+      How pull request text from people without push access is handled. `label` (default) tags every
+      author as maintainer, collaborator, bot or external and frames all PR text as data; `strict`
+      additionally withholds comments from external users other than the PR author; `off` disables
+      tagging. CLI flags can tighten this but never relax it.
+    required: false
+    default: "label"
   include_discussion:
     description: "Give the model the existing conversation, inline review threads and review states."
     required: false
@@ -198,6 +210,8 @@ runs:
         INPUT_MAX_TOOL_RESULT_CHARS: ${{ inputs.max_tool_result_chars }}
         INPUT_INLINE_DIFF_CHARS: ${{ inputs.inline_diff_chars }}
         INPUT_GENERATE_TEST_PLAN: ${{ inputs.generate_test_plan }}
+        INPUT_INCLUDE_CI: ${{ inputs.include_ci }}
+        INPUT_LOCKDOWN: ${{ inputs.lockdown }}
         INPUT_INCLUDE_DISCUSSION: ${{ inputs.include_discussion }}
         INPUT_MAX_DISCUSSION_CHARS: ${{ inputs.max_discussion_chars }}
         INPUT_REVIEW_PROFILE: ${{ inputs.review_profile }}

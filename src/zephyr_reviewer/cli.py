@@ -16,8 +16,9 @@ from .intel import SourceIntel
 from .review import publish as pub
 from .review import testplan
 from .review.agent import LocalTool, run_review
+from .review.ci import CI_FAILURE_LOGS_TOOL, CI_STATUS_TOOL, CIResults
 from .review.config import ReviewConfig
-from .review.discussion import PR_DISCUSSION_TOOL, Discussion
+from .review.discussion import PR_DISCUSSION_TOOL, Discussion, trust_level
 from .review.github_api import GitHub, PullRequest, pr_number_from_event
 from .review.mcp_client import ToolBridge, stdio_params
 from .review.openrouter import OpenRouter
@@ -50,6 +51,12 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-steps", type=int)
     p.add_argument("--max-context-tokens", type=int)
     p.add_argument("--test-plan", action="store_true", help="Also produce a test plan: suites, scenarios, platforms")
+    p.add_argument(
+        "--lockdown",
+        choices=["off", "label", "strict"],
+        help="Handling of PR text from users without push access (can only tighten the operator setting)",
+    )
+    p.add_argument("--no-ci", action="store_true", help="Do not fetch CI results")
     p.add_argument("--inline", action="store_true", help="Also post findings as inline review comments")
     p.add_argument("--no-comment", action="store_true", help="Do not post or update the summary comment")
     p.add_argument("--fail-on-severity", choices=["none", "suggestion", "low", "medium", "high", "critical"])
@@ -60,6 +67,7 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
 
 def _config(args: argparse.Namespace) -> ReviewConfig:
     cfg = ReviewConfig.from_env()
+    floor = cfg.policy()
     for attr, key in (
         ("repo_root", "repo_root"),
         ("repository", "repo_slug"),
@@ -69,8 +77,6 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         ("github_token", "github_token"),
         ("profile", "profile"),
         ("project_context", "project_context"),
-        ("max_steps", "max_steps"),
-        ("max_context_tokens", "max_context_tokens"),
         ("fail_on_severity", "fail_on_severity"),
         ("output_dir", "output_dir"),
     ):
@@ -97,14 +103,22 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         cfg.verify_max_steps = args.verify_max_steps
     if args.test_plan:
         cfg.generate_test_plan = True
-    if args.inline:
-        cfg.post_inline = True
-    if args.no_comment:
-        cfg.post_comment = False
-    if args.dry_run:
-        cfg.dry_run = True
+    if args.no_ci:
+        cfg.include_ci = False
     if args.in_process:
         cfg.in_process_server = True
+    # Safety settings: the environment (workflow inputs) is the operator floor; flags may only tighten it.
+    policy, rejected = floor.tighten(
+        lockdown=args.lockdown,
+        max_steps=args.max_steps,
+        max_context_tokens=args.max_context_tokens,
+        post_inline=True if args.inline else None,
+        post_comment=False if args.no_comment else None,
+        dry_run=True if args.dry_run else None,
+    )
+    for r in rejected:
+        log(f"::warning::ignored: {r}")
+    cfg.apply_policy(policy)
     return cfg
 
 
@@ -183,22 +197,52 @@ def _skip_reason(cfg: ReviewConfig, pr: PullRequest) -> str | None:
 def _load_discussion(cfg: ReviewConfig, gh: GitHub | None, pr: PullRequest) -> Discussion | None:
     if gh is None or not pr.number or not cfg.include_discussion:
         return None
-    d = Discussion.fetch(gh, pr.number, f"<!-- {cfg.comment_tag} -->")
+    d = Discussion.fetch(gh, pr.number, f"<!-- {cfg.comment_tag} -->", lockdown=cfg.lockdown, pr_author=pr.author)
+    withheld = sum(1 for c in [*d.conversation, *d.inline, *d.reviews] if c.withheld)
     log(
         f"discussion: {len(d.conversation)} comment(s), {len(d.inline)} inline, {len(d.reviews)} review(s)"
         f"{', previous AI review present' if d.previous_ai else ''}"
+        f"{', thread resolution known' if d.resolution_known else ''}"
+        f"{f', {withheld} withheld (strict lockdown)' if withheld else ''}"
     )
     return d
 
 
-async def _run(cfg: ReviewConfig, pr: PullRequest, intel: SourceIntel, discussion: Discussion | None = None):
+def _load_ci(cfg: ReviewConfig, gh: GitHub | None, pr: PullRequest) -> CIResults | None:
+    if gh is None or not pr.number or not cfg.include_ci:
+        return None
+    ci = CIResults(gh, pr.head_sha, max_chars=cfg.max_tool_result_chars)
+    log(ci.summary_line())
+    return ci
+
+
+async def _run(
+    cfg: ReviewConfig,
+    pr: PullRequest,
+    intel: SourceIntel,
+    discussion: Discussion | None = None,
+    ci: CIResults | None = None,
+    author_trust: str = "",
+):
     profile = load_profile(cfg.profile)
     system = system_prompt(profile, cfg.language)
     overview = intel.overview()
     diff = intel.diff_text if len(intel.diff_text) <= cfg.inline_diff_chars else None
     digest = discussion.digest(cfg.max_discussion_chars) if discussion else None
-    opening = opening_message(pr, overview, diff, cfg.project_context, cfg.repo_slug, digest, cfg.generate_test_plan)
+    opening = opening_message(
+        pr,
+        overview,
+        diff,
+        cfg.project_context,
+        cfg.repo_slug,
+        digest,
+        cfg.generate_test_plan,
+        author_trust=author_trust,
+        ci_summary=ci.summary_line() if ci else "",
+    )
     extra_tools = [LocalTool(PR_DISCUSSION_TOOL, discussion.tool_handler)] if discussion else []
+    if ci:
+        extra_tools += [LocalTool(CI_STATUS_TOOL, ci.status_tool), LocalTool(CI_FAILURE_LOGS_TOOL, ci.logs_tool)]
     changed = {f.path: f.new_side_lines for f in intel.files}
     llm = OpenRouter(
         cfg.openrouter_api_key,
@@ -271,7 +315,8 @@ def cmd_review(args: argparse.Namespace) -> int:
         pub.write_outputs({"skipped": "true", "verdict": "skipped", "findings_count": 0, "highest_severity": "none"})
         return 0
     log(f"reviewing {len(intel.files)} file(s), {len(intel.commits)} commit(s): {cfg.base[:12]}..{cfg.head[:12]}")
-    run = asyncio.run(_run(cfg, pr, intel, _load_discussion(cfg, gh, pr)))
+    author_trust = trust_level(gh, pr.author, False) if gh is not None and cfg.lockdown != "off" and pr.author else ""
+    run = asyncio.run(_run(cfg, pr, intel, _load_discussion(cfg, gh, pr), _load_ci(cfg, gh, pr), author_trust))
     if run.review is not None and run.review.test_plan:
         testplan.annotate(run.review, intel)
         flagged = sum(1 for e in run.review.test_plan if e.notes)

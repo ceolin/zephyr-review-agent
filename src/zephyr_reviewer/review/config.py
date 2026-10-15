@@ -9,6 +9,8 @@ import json
 import os
 from dataclasses import dataclass, field
 
+from .policy import LOCKDOWN_LEVELS, Policy
+
 SEVERITY_RANK = {"none": 0, "suggestion": 1, "low": 2, "medium": 3, "high": 4, "critical": 5}
 
 
@@ -54,6 +56,8 @@ class ReviewConfig:
     max_tool_result_chars: int = 24_000
     inline_diff_chars: int = 60_000
     generate_test_plan: bool = False
+    include_ci: bool = True
+    lockdown: str = "label"
     include_discussion: bool = True
     max_discussion_chars: int = 12_000
     language: str = "English"
@@ -101,6 +105,8 @@ class ReviewConfig:
         cfg.max_tool_result_chars = int(_env("max_tool_result_chars", str(cfg.max_tool_result_chars)))
         cfg.inline_diff_chars = int(_env("inline_diff_chars", str(cfg.inline_diff_chars)))
         cfg.generate_test_plan = _bool(_env("generate_test_plan"), False)
+        cfg.include_ci = _bool(_env("include_ci"), True)
+        cfg.lockdown = _env("lockdown", "label").strip().lower() or "label"
         cfg.include_discussion = _bool(_env("include_discussion"), True)
         cfg.max_discussion_chars = int(_env("max_discussion_chars", str(cfg.max_discussion_chars)))
         cfg.language = _env("language", cfg.language)
@@ -123,6 +129,8 @@ class ReviewConfig:
         errors = []
         if not self.openrouter_api_key:
             errors.append("OpenRouter API key missing (--api-key, OPENROUTER_API_KEY or INPUT_OPENROUTER_API_KEY)")
+        if self.lockdown not in LOCKDOWN_LEVELS:
+            errors.append(f"lockdown must be one of {', '.join(LOCKDOWN_LEVELS)}")
         if self.fail_on_severity not in SEVERITY_RANK:
             errors.append(f"fail_on_severity must be one of {', '.join(SEVERITY_RANK)}")
         if not self.models:
@@ -134,3 +142,24 @@ class ReviewConfig:
         if self.pr_number is not None and not self.github_token and not self.dry_run:
             errors.append("GitHub token missing (--github-token, GITHUB_TOKEN or INPUT_GITHUB_TOKEN)")
         return errors
+
+    def policy(self) -> Policy:
+        """The safety floor set by the operator (environment / workflow inputs)."""
+        return Policy(
+            lockdown=self.lockdown,
+            max_steps=self.max_steps,
+            max_context_tokens=self.max_context_tokens,
+            max_tool_result_chars=self.max_tool_result_chars,
+            post_comment=self.post_comment,
+            post_inline=self.post_inline,
+            dry_run=self.dry_run,
+        )
+
+    def apply_policy(self, policy: Policy) -> None:
+        self.lockdown = policy.lockdown
+        self.max_steps = policy.max_steps
+        self.max_context_tokens = policy.max_context_tokens
+        self.max_tool_result_chars = policy.max_tool_result_chars
+        self.post_comment = policy.post_comment
+        self.post_inline = policy.post_inline
+        self.dry_run = policy.dry_run

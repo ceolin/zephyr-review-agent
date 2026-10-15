@@ -11,11 +11,91 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import Any, TypedDict
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
 
 from .intel import SourceIntel
+
+
+# Typed outputs: these tools return human-readable text for the model *and* structured content for
+# programmatic clients. The return annotation publishes the output schema; the function returns a
+# CallToolResult carrying both.
+class CommitOut(TypedDict):
+    sha: str
+    author: str
+    subject: str
+
+
+class ChangedFileOut(TypedDict):
+    path: str
+    status: str
+    old_path: str | None
+    additions: int
+    deletions: int
+    binary: bool
+    areas: list[str]
+
+
+class OverviewOut(TypedDict):
+    base_sha: str
+    head_sha: str
+    shallow: bool
+    commits: list[CommitOut]
+    files: list[ChangedFileOut]
+
+
+class FileGroupOut(TypedDict):
+    name: str
+    collaborators: list[str]
+
+
+class AreaOut(TypedDict):
+    name: str
+    status: str
+    maintainers: list[str]
+    collaborators: list[str]
+    labels: list[str]
+    tests: list[str]
+    file_groups: list[FileGroupOut]
+
+
+class MaintainersOut(TypedDict):
+    path: str
+    areas: list[AreaOut]
+
+
+class PlatformOut(TypedDict):
+    identifier: str
+    board: str
+    full_name: str
+    directory: str
+
+
+class PlatformsOut(TypedDict):
+    total_identifiers: int
+    total_boards: int
+    fragment: str
+    platforms: list[PlatformOut]
+
+
+class DefinitionOut(TypedDict):
+    kind: str
+    path: str
+    line: int
+    text: str
+
+
+class DefinitionsOut(TypedDict):
+    name: str
+    definitions: list[DefinitionOut]
+
+
+def _both(text: str, data: dict[str, Any]) -> Any:
+    return CallToolResult(content=[TextContent(type="text", text=text)], structured_content=data)
+
 
 INSTRUCTIONS = """\
 Source intelligence for a Zephyr RTOS pull request. Every tool answers against the
@@ -36,32 +116,32 @@ def build_server(intel: SourceIntel, name: str = "zephyr-source-intel") -> MCPSe
             raise ToolError(f"{type(exc).__name__}: {exc}") from exc
 
     @srv.tool()
-    def pr_overview() -> str:
+    def pr_overview() -> OverviewOut:
         """Commits, changed files with +/- counts, and the MAINTAINERS areas each file falls in. Call this first."""
-        return guard(intel.overview)
+        return guard(lambda: _both(intel.overview(), intel.overview_data()))
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def commit_messages() -> str:
         """Full commit messages of the pull request, oldest first (Zephyr reviews the message, not only the code)."""
         return guard(intel.commit_messages)
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def file_diff(path: str, context_lines: int = 3) -> str:
         """Unified diff of one changed file between base and head, with the given context."""
         return guard(intel.diff_for, path, context_lines)
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def read_file(path: str, start_line: int = 1, end_line: int | None = None) -> str:
         """Read a file at the head commit with line numbers; lines added by the PR are marked '+'.
         At most 400 lines per call; omit end_line to read 400 lines from start_line."""
         return guard(intel.read, path, start_line, end_line)
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def read_file_at_base(path: str, start_line: int = 1, end_line: int | None = None) -> str:
         """Read a file as it was at the base commit, to compare old and new behavior."""
         return guard(intel.read_base, path, start_line, end_line)
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def search(
         pattern: str,
         path: str | None = None,
@@ -82,44 +162,44 @@ def build_server(intel: SourceIntel, name: str = "zephyr-source-intel") -> MCPSe
             max_results=max_results,
         )
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def list_files(pattern: str) -> str:
         """List files matching a glob at the head commit, e.g. dts/bindings/i2c/*.yaml or tests/drivers/i2c/**."""
         return guard(intel.list_files, pattern)
 
     @srv.tool()
-    def find_definition(name: str, path: str | None = None) -> str:
+    def find_definition(name: str, path: str | None = None) -> DefinitionsOut:
         """Where a C function, macro, struct, typedef, Kconfig symbol (CONFIG_FOO), devicetree compatible
         (vendor,device) or CMake function is defined. Optionally restrict to a path."""
-        return guard(intel.definition, name, path)
+        return guard(lambda: _both(intel.definition(name, path), intel.definition_data(name, path)))
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def find_references(name: str, path: str | None = None, max_results: int = 60) -> str:
         """Who uses a symbol: counts per area, then individual sites, changed files first."""
         return guard(intel.references, name, path, max_results)
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def kconfig_symbol(name: str) -> str:
         """Every definition block of a Kconfig symbol (depends on, select, default, help) and its users
         in Kconfig, .conf/defconfig, CMake and source."""
         return guard(intel.kconfig, name)
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def dt_binding(compatible_or_name: str) -> str:
         """The devicetree binding YAML for a compatible, plus the drivers (DT_DRV_COMPAT) and nodes using it."""
         return guard(intel.dt_binding, compatible_or_name)
 
     @srv.tool()
-    def maintainers(path: str) -> str:
+    def maintainers(path: str) -> MaintainersOut:
         """MAINTAINERS.yml areas covering a path: status, maintainers, collaborators, labels, test identifiers."""
-        return guard(intel.maintainers_for, path)
+        return guard(lambda: _both(intel.maintainers_for(path), intel.maintainers_data(path)))
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def related_tests(path_or_symbol: str) -> str:
         """Twister suites (tests.yaml / sample.yaml) covering a path or mentioning a symbol, with tags and platforms."""
         return guard(intel.related_tests, path_or_symbol)
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def test_candidates() -> str:
         """Everything a test plan for this change should consider: suites the PR edits, MAINTAINERS test
         identifiers, implicated twister tags, suites covering the changed source (with scenarios, tags,
@@ -128,22 +208,22 @@ def build_server(intel: SourceIntel, name: str = "zephyr-source-intel") -> MCPSe
         return guard(intel.test_candidates)
 
     @srv.tool()
-    def list_platforms(fragment: str) -> str:
+    def list_platforms(fragment: str) -> PlatformsOut:
         """Valid twister platform identifiers (board/soc[/qualifiers]) whose name, board or vendor contains
         the fragment, e.g. 'nrf5340', 'qemu', 'native', 'stm32h7'. Use it to validate a test plan."""
-        return guard(intel.platforms, fragment)
+        return guard(lambda: _both(intel.platforms(fragment), intel.platforms_data(fragment)))
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def file_history(path: str, count: int = 10) -> str:
         """Recent commits touching a path at the head commit."""
         return guard(intel.history, path, count)
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def blame(path: str, start_line: int, end_line: int) -> str:
         """git blame for a line range at the head commit (at most 200 lines)."""
         return guard(intel.blame, path, start_line, end_line)
 
-    @srv.tool()
+    @srv.tool(structured_output=False)
     def project_guidelines(topic: str = "agents") -> str:
         """Zephyr contribution rules. Topics: agents, guidelines, expectations, reviewer, style-c, style-kconfig,
         style-cmake, style-devicetree, coding-guidelines, bindings, kconfig-tips, or a doc/ path."""
