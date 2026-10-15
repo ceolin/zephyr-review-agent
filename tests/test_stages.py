@@ -119,7 +119,8 @@ async def test_draft_then_verify_passes_evidence_and_merges_accounting(mini_repo
     v_tool = [m for m in verify.requests[1]["messages"] if m["role"] == "tool"][0]
     assert "   17+| \tif (ret < 0) {" in v_tool["content"]
 
-    body = render_comment(run.review, run, pr, repo="o/r", tag="t")
+    assert "two stages" not in render_comment(run.review, run, pr, repo="o/r", tag="t")
+    body = render_comment(run.review, run, pr, repo="o/r", tag="t", details=True)
     assert "in two stages, draft: anthropic/claude-sonnet-4.5 (2 step(s)) then verify:" in body
     assert "Bogus" not in body
 

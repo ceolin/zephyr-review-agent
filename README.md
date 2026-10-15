@@ -163,8 +163,8 @@ Stage 1 runs the normal review with the cheap model. Stage 2 receives the same o
 the draft review and a dossier of the evidence stage 1 gathered (deduplicated tool results, highest
 value first, within `dossier_chars`), keeps live tool access with its own smaller step budget, and
 is told to confirm, correct or drop every draft finding against the code, then spend what remains
-on the riskiest regions the draft may have missed. Only the final review is published; the comment
-footer and `review.json` record both stages' models, steps and cost. If the cheap model fails to
+on the riskiest regions the draft may have missed. Only the final review is published;
+`review.json` and the step summary record both stages' models, steps and cost. If the cheap model fails to
 submit, stage 2 runs as a full single-stage review, so the option can only cost, never degrade.
 
 Expect the saving to be large when the draft model is an order of magnitude cheaper and the
@@ -219,6 +219,12 @@ looser. A rejected relaxation is logged and ignored. See `src/zephyr_reviewer/re
 Tools whose results programs will consume, `pr_overview`, `maintainers`, `list_platforms` and
 `find_definition`, publish an output schema and return structured content alongside the prose the
 model reads. The remaining tools return text; they gain schemas as consumers appear.
+
+### Run details
+
+The posted comment ends with the one-line advisory notice and nothing else. Models, steps, tool
+calls, tokens, cost and time go to the job's step summary, the log and `review.json`. Set
+`show_run_details: "true"` (or `--show-details`) to append them to the comment.
 
 ### Issues only
 

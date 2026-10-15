@@ -70,6 +70,7 @@ class ReviewConfig:
     post_comment: bool = True
     post_inline: bool = False
     comment_tag: str = "zephyr-reviewer"
+    show_run_details: bool = False
     fail_on_severity: str = "none"
     dry_run: bool = False
     in_process_server: bool = False
@@ -117,6 +118,7 @@ class ReviewConfig:
         cfg.post_comment = _bool(_env("post_comment"), True)
         cfg.post_inline = _bool(_env("post_inline_comments"), False)
         cfg.comment_tag = _env("comment_tag", cfg.comment_tag)
+        cfg.show_run_details = _bool(_env("show_run_details"), False)
         cfg.fail_on_severity = _env("fail_on_severity", "none").strip().lower() or "none"
         cfg.dry_run = _bool(_env("dry_run"), False)
         cfg.output_dir = _env("output_dir", cfg.output_dir)

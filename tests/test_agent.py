@@ -189,6 +189,10 @@ async def test_agent_investigates_then_submits(mini_repo):
     assert not context.inline and "not on the new side" in context.notes[0]
 
     body = render_comment(review, run, pr, repo="zephyrproject-rtos/zephyr", tag="zephyr-reviewer")
+    # The posted comment carries no run statistics unless asked for.
+    assert "tool call(s)" not in body and "$0.0" not in body and "anthropic/claude" not in body
+    assert body.rstrip().endswith("It is advisory; verify before acting on it.</sub>")
+    body = render_comment(review, run, pr, repo="zephyrproject-rtos/zephyr", tag="zephyr-reviewer", details=True)
     assert body.startswith("<!-- zephyr-reviewer -->")
     assert "🛑 **Request changes**" in body
     assert "blob/" + mini_repo["head"] + "/drivers/i2c/i2c_foo.c#L17" in body

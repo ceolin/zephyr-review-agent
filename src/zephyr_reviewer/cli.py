@@ -23,7 +23,7 @@ from .review.github_api import GitHub, PullRequest, pr_number_from_event
 from .review.mcp_client import ToolBridge, stdio_params
 from .review.openrouter import OpenRouter
 from .review.prompts import load_profile, opening_message, system_prompt
-from .review.render import render_comment, render_failure
+from .review.render import render_comment, render_failure, run_details
 from .review.stages import run_two_stage
 
 
@@ -57,6 +57,9 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
         help="Handling of PR text from users without push access (can only tighten the operator setting)",
     )
     p.add_argument("--no-ci", action="store_true", help="Do not fetch CI results")
+    p.add_argument(
+        "--show-details", action="store_true", help="Append models, steps, tokens, cost and time to the posted comment"
+    )
     p.add_argument("--inline", action="store_true", help="Also post findings as inline review comments")
     p.add_argument("--no-comment", action="store_true", help="Do not post or update the summary comment")
     p.add_argument("--fail-on-severity", choices=["none", "suggestion", "low", "medium", "high", "critical"])
@@ -105,6 +108,8 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         cfg.generate_test_plan = True
     if args.no_ci:
         cfg.include_ci = False
+    if args.show_details:
+        cfg.show_run_details = True
     if args.in_process:
         cfg.in_process_server = True
     # Safety settings: the environment (workflow inputs) is the operator floor; flags may only tighten it.
@@ -322,7 +327,15 @@ def cmd_review(args: argparse.Namespace) -> int:
         flagged = sum(1 for e in run.review.test_plan if e.notes)
         log(f"test plan: {len(run.review.test_plan)} entries, {flagged} flagged by validation")
     if run.review is not None:
-        body = render_comment(run.review, run, pr, repo=cfg.repo_slug, tag=cfg.comment_tag, api_url=cfg.github_api_url)
+        body = render_comment(
+            run.review,
+            run,
+            pr,
+            repo=cfg.repo_slug,
+            tag=cfg.comment_tag,
+            api_url=cfg.github_api_url,
+            details=cfg.show_run_details,
+        )
     else:
         body = render_failure(run, pr, cfg.comment_tag)
         log("::error::" + "; ".join(run.errors))
@@ -330,7 +343,8 @@ def cmd_review(args: argparse.Namespace) -> int:
     log(f"artifacts in {out_dir}")
     outputs = pub.publish(cfg, gh, pr, run, body, log=log)
     pub.write_outputs(outputs)
-    pub.write_summary(body)
+    pub.write_summary(body + "\n\n" + run_details(run, pr))  # the step summary always carries the run details
+    log(run_details(run, pr))
     if cfg.dry_run or gh is None:
         print(body)
     failure = pub.gate_fails(run, cfg)
