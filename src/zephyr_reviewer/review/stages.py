@@ -129,7 +129,8 @@ def verification_message(draft: RunResult, dossier: str, draft_models: list[str]
             "handled by code the draft did not read.",
             "2. Then look for what the first pass missed in the riskiest changed regions (locking and lifetimes, "
             "error paths, Kconfig/devicetree correctness, public API changes). Spend your remaining budget there.",
-            "3. Re-assess tests, commit messages and the existing discussion with your own judgement.",
+            "3. Re-check any test, commit message or discussion problem the draft raised; keep it only if real. "
+            "Those fields stay empty when there is no problem.",
             f"4. Call `{SUBMIT_TOOL_NAME}` with the final review. Set `evidence` on each finding to what *you* "
             "verified. Do not mention the draft, the first pass, or the staging in the review text.",
         ]

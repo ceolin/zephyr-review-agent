@@ -219,5 +219,5 @@ async def test_agent_offers_the_discussion_tool_and_digest(mini_repo):
     from zephyr_reviewer.review.render import render_comment
 
     body = render_comment(run.review, run, pr, repo="o/r", tag="zephyr-reviewer")
-    assert "### Existing discussion" in body and "still unaddressed" in body
+    assert "### Unresolved discussion" in body and "still unaddressed" in body
     assert json.dumps(run.review.to_dict())  # serializable for review.json

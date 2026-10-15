@@ -122,11 +122,11 @@ def render_comment(
             out.append(_finding_md(f, idx, repo, pr.head_sha, api_url))
         out.append("</details>\n")
     if review.test_assessment:
-        out += ["### Tests", "", review.test_assessment, ""]
+        out += ["### Test gaps", "", review.test_assessment, ""]
     if review.commit_message_assessment:
-        out += ["### Commit messages", "", review.commit_message_assessment, ""]
+        out += ["### Commit message issues", "", review.commit_message_assessment, ""]
     if review.discussion_assessment:
-        out += ["### Existing discussion", "", review.discussion_assessment, ""]
+        out += ["### Unresolved discussion", "", review.discussion_assessment, ""]
     if review.test_plan:
         out += render_test_plan(review)
     cost = f" · ${run.usage.cost:.3f}" if run.usage.cost else ""

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -52,8 +53,8 @@ SUBMIT_REVIEW_TOOL: dict[str, Any] = {
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "Two to four sentences: what the PR changes, which "
-                    "subsystems and configurations are affected, and the overall result.",
+                    "description": "One or two sentences: the review result and the most important issue, if any. "
+                    "Do not describe what the pull request does; the author and maintainers know.",
                 },
                 "verdict": {"type": "string", "enum": VERDICTS},
                 "confidence": {
@@ -113,9 +114,9 @@ SUBMIT_REVIEW_TOOL: dict[str, Any] = {
                 },
                 "test_assessment": {
                     "type": "string",
-                    "description": "What behavior is tested, what material "
-                    "behavior is not, and whether tests are required before merge. Empty when the "
-                    "change needs no tests.",
+                    "description": "Only when the tests are missing or wrong: what material behavior is untested or "
+                    "what a test gets wrong, and whether tests are required before merge. Empty string when the "
+                    "tests are adequate or the change needs none. Never describe what is tested.",
                 },
                 "test_plan": {
                     "type": "array",
@@ -148,15 +149,14 @@ SUBMIT_REVIEW_TOOL: dict[str, Any] = {
                 },
                 "discussion_assessment": {
                     "type": "string",
-                    "description": "How the existing review discussion stands against the current head: which "
-                    "requests are addressed, which are still open, and any comment the code contradicts, with "
-                    "evidence. Empty when there is no discussion.",
+                    "description": "Only when the existing discussion leaves a problem: a reviewer's request the head "
+                    "commit does not address, or a claim in the discussion the code contradicts, with evidence. "
+                    "Empty string otherwise. Never summarize the discussion or list what was resolved.",
                 },
                 "commit_message_assessment": {
                     "type": "string",
-                    "description": "Whether the commit messages "
-                    "explain the why, match the change, and follow project rules. Empty "
-                    "when fine.",
+                    "description": "Only when a commit message has a problem: it does not explain why, does not match "
+                    "the change, mixes unrelated changes, or lacks a required trailer. Empty string otherwise.",
                 },
             },
         },
@@ -219,6 +219,34 @@ class Review:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+_ALL_CLEAR = re.compile(
+    r"^(none|n/?a|no (issues?|problems?|concerns?|gaps?|changes? (needed|required))"
+    r"|nothing (to (report|add|note)|further)"
+    r"|not applicable|fine|ok|okay|adequate|sufficient|looks good|lgtm|good)\b"
+    r"|\b(no (issues?|problems?|concerns?|gaps?) (found|identified|noted)"
+    r"|are adequate|is adequate|are sufficient|is sufficient|as expected"
+    r"|well covered|adequately covered|properly (tested|covered)"
+    r"|all (threads|requests|comments) (are |have been )?(addressed|resolved))\b",
+    re.I,
+)
+_PROBLEM_MARKERS = re.compile(
+    r"\b(missing|lacks?|lacking|untested|not (tested|covered|exercised|addressed|verified)"
+    r"|does not|doesn't|do not|don't|should|must|needs?|required|however|but"
+    r"|wrong|incorrect|fails?|broken|contradicts?|unaddressed|still open|gap)\b",
+    re.I,
+)
+
+
+def _issues_only(text: Any, max_clear_len: int = 240) -> str:
+    """Drop short all-clear boilerplate ('tests are adequate'); keep anything that names a problem."""
+    t = str(text or "").strip()
+    if not t:
+        return ""
+    if len(t) <= max_clear_len and _ALL_CLEAR.search(t) and not _PROBLEM_MARKERS.search(t):
+        return ""
+    return t
 
 
 def _norm_enum(value: Any, allowed: list[str], default: str) -> str:
@@ -343,9 +371,9 @@ def parse_review(args: dict[str, Any], changed_lines: dict[str, set[int]]) -> tu
         verdict=verdict,
         confidence=confidence,
         findings=findings,
-        test_assessment=str(args.get("test_assessment") or "").strip(),
-        commit_message_assessment=str(args.get("commit_message_assessment") or "").strip(),
-        discussion_assessment=str(args.get("discussion_assessment") or "").strip(),
+        test_assessment=_issues_only(args.get("test_assessment")),
+        commit_message_assessment=_issues_only(args.get("commit_message_assessment")),
+        discussion_assessment=_issues_only(args.get("discussion_assessment")),
         test_plan=plan,
     )
     return review, []

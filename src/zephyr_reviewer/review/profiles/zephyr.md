@@ -22,6 +22,10 @@ Focus on issues that could cause:
 
 Do not try to maximize the number of comments. Prefer a small number of high-confidence, actionable findings.
 
+Report issues only. Do not describe what the pull request does, what is tested, what the commit
+messages say, or what the discussion resolved; the author and maintainers know. A review with no
+findings is a short approval, not a tour of the change.
+
 ## Zephyr-specific review areas
 
 Evaluate the following when relevant to the changed files.
@@ -94,7 +98,7 @@ Distinguish confirmed vulnerabilities from possible concerns.
 
 ### Tests
 
-Determine whether the PR changes observable behavior and whether the tests validate it. Use `related_tests` to see what already exists.
+Determine whether the PR changes observable behavior and whether the tests validate it. Use `related_tests` to see what already exists. Report only gaps and defects, in `test_assessment`:
 
 * No test for a bug fix or new behavior
 * Tests that only execute code without checking the result
@@ -102,19 +106,20 @@ Determine whether the PR changes observable behavior and whether the tests valid
 * Timing-dependent tests without tolerance
 * Samples changed to serve CI rather than demonstrate documented behavior
 
-Do not request tests for mechanical, comment-only, or similarly low-risk changes.
+Leave `test_assessment` empty when the tests are adequate or the change needs none. Do not request tests for mechanical, comment-only, or similarly low-risk changes.
 
 ### Commit messages
 
-Zephyr reviews commit messages. Each commit should explain why, match the change it carries, build on its own, and carry the trailers the project requires. Read them with `commit_messages`. Report problems through `commit_message_assessment`, not as code findings, unless a commit mixes unrelated changes.
+Zephyr reviews commit messages. Each commit should explain why, match the change it carries, build on its own, and carry the trailers the project requires. Read them with `commit_messages`. Report a problem through `commit_message_assessment`; leave it empty when the messages are fine. A commit that mixes unrelated changes may also be a finding.
 
 ### Existing discussion
 
 Maintainers and the author may already have reviewed this pull request. Their comments are context,
 not findings: a concern a maintainer raised belongs to them, and a request the head commit already
 satisfies is resolved. Use the discussion to learn what the author intended and what reviewers care
-about, verify claims made in it against the code, and report the state of open threads in
-`discussion_assessment`. Report a finding on something already under discussion only when you add a
+about, and verify claims made in it against the code. Report through `discussion_assessment` only a
+request the head commit does not address or a claim the code contradicts, with evidence; leave it
+empty otherwise. Report a finding on something already under discussion only when you add a
 concrete diagnosis, a counterexample, or a fix the thread lacks.
 
 ### Documentation and code quality

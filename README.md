@@ -181,9 +181,17 @@ review, if one exists, is shown separately and labelled as not being evidence.
 
 The profile tells the model how to use it: a concern a maintainer already raised is theirs, not a
 new finding; a request the head commit satisfies is resolved; author replies are checked against
-the code rather than taken on trust. The outcome lands in a `discussion_assessment` section of the
-comment: which threads are addressed, which are open, and anything the code contradicts. Turn it
-off with `include_discussion: "false"`.
+the code rather than taken on trust. Only problems are reported, in an "Unresolved discussion"
+section of the comment: a request the head commit does not address, or a claim the code
+contradicts. Turn it off with `include_discussion: "false"`.
+
+### Issues only
+
+The review reports problems and nothing else. The summary states the result and the key issue
+rather than describing the change. The test, commit-message and discussion assessments appear in
+the comment only when something is missing or wrong; the schema and profile say so, and a filter
+drops short all-clear boilerplate ("tests are adequate", "no issues found") should a model write it
+anyway. A clean pull request gets a short approval.
 
 ### Model selection
 

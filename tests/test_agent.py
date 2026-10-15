@@ -193,7 +193,7 @@ async def test_agent_investigates_then_submits(mini_repo):
     assert "🛑 **Request changes**" in body
     assert "blob/" + mini_repo["head"] + "/drivers/i2c/i2c_foo.c#L17" in body
     assert "```c\n\tif (ret < 0) {" in body
-    assert "### Tests" in body and "2 tool call(s)" in body and "$0.025" in body
+    assert "### Test gaps" in body and "2 tool call(s)" in body and "$0.025" in body
 
     inline = inline_comments(review)
     assert len(inline) == 2
@@ -285,6 +285,35 @@ def test_openrouter_retries_then_fails_cleanly():
     with pytest.raises(OpenRouterError):
         llm.chat([{"role": "user", "content": "hi"}])
     assert calls["n"] == 2
+
+
+def test_parse_review_keeps_only_problems_in_assessments():
+    base = {"summary": "ok", "verdict": "approve", "confidence": "high", "findings": []}
+    clear = {
+        "test_assessment": "Tests are adequate for this change.",
+        "commit_message_assessment": "No issues found.",
+        "discussion_assessment": "All threads have been addressed.",
+    }
+    review, _ = parse_review({**base, **clear}, {})
+    assert review is not None
+    assert (
+        review.test_assessment == "" and review.commit_message_assessment == "" and review.discussion_assessment == ""
+    )
+    kept = {
+        "test_assessment": "The recovery scenario enables the option but does not exercise foo_recover().",
+        "commit_message_assessment": "The second commit mixes the Kconfig change with the fix; split it.",
+        "discussion_assessment": "@bob's request to release the lock on the error path is still unaddressed.",
+    }
+    review, _ = parse_review({**base, **kept}, {})
+    assert review is not None
+    assert review.test_assessment == kept["test_assessment"]
+    assert review.commit_message_assessment == kept["commit_message_assessment"]
+    assert review.discussion_assessment == kept["discussion_assessment"]
+    # Short but naming a problem: kept. Long prose: kept even if it opens positively.
+    review, _ = parse_review({**base, "test_assessment": "Adequate, but the error path is untested."}, {})
+    assert review is not None and review.test_assessment
+    review, _ = parse_review({**base, "test_assessment": "Looks good. " + "x" * 300}, {})
+    assert review is not None and review.test_assessment
 
 
 def test_parse_review_normalizes_vocabulary():
