@@ -71,7 +71,28 @@ zephyr-reviewer review --repo ~/zephyrproject/zephyr --repository zephyrproject-
 ```
 
 Drop `--dry-run` to post the comment; add `--inline` to also attach anchored findings to the
-changed lines.
+changed lines. `--ask` shows the finished review and prompts before anything is posted, with an
+option to edit `comment.md` first:
+
+```
+Post the summary comment and 2 inline comment(s) to PR #12345? [y]es / [n]o / [e]dit comment.md:
+```
+
+### Publish modes
+
+`publish` is `post`, `ask` or `never` (`dry_run: "true"` means `never`). In a job with no terminal,
+`ask` saves the review without posting and prints the command to publish it after a person has
+read it:
+
+```bash
+zephyr-reviewer post --output-dir review-output --repository zephyrproject-rtos/zephyr [--inline]
+```
+
+`post` reads `review.json` and `comment.md` from the directory, so the comment can be edited or
+trimmed first, asks for confirmation (or `--yes`), and publishes with the same hidden marker so a
+later run updates it in place. This is the shape Zephyr's AI policy asks for: a human reads the
+model's output before it reaches the pull request. Like the other safety settings, `publish` can
+be tightened by flags but not relaxed below the workflow's value.
 
 ### Use the MCP server from another client
 

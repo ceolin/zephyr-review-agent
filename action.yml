@@ -154,8 +154,15 @@ inputs:
     description: "Fail the step when a finding at or above this severity stands: none, suggestion, low, medium, high, critical."
     required: false
     default: "none"
+  publish:
+    description: >-
+      `post` publishes the review to the pull request. `ask` saves it (comment.md, review.json) for a
+      person to read and publish later with `zephyr-reviewer post`; nothing reaches the PR from the
+      job. `never` is a dry run. Can only be tightened by CLI flags, never relaxed.
+    required: false
+    default: "post"
   dry_run:
-    description: "Run the review and upload artifacts, but do not post to the pull request."
+    description: "Alias for publish: never."
     required: false
     default: "false"
   output_dir:
@@ -178,6 +185,9 @@ outputs:
     value: ${{ steps.review.outputs.comment_url }}
   review_url:
     value: ${{ steps.review.outputs.review_url }}
+  posted:
+    description: "true when something was posted to the pull request."
+    value: ${{ steps.review.outputs.posted }}
   skipped:
     value: ${{ steps.review.outputs.skipped }}
 
@@ -231,5 +241,6 @@ runs:
         INPUT_SHOW_RUN_DETAILS: ${{ inputs.show_run_details }}
         INPUT_COMMENT_TAG: ${{ inputs.comment_tag }}
         INPUT_FAIL_ON_SEVERITY: ${{ inputs.fail_on_severity }}
+        INPUT_PUBLISH: ${{ inputs.publish }}
         INPUT_DRY_RUN: ${{ inputs.dry_run }}
         INPUT_OUTPUT_DIR: ${{ inputs.output_dir }}

@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 LOCKDOWN_LEVELS = ["off", "label", "strict"]
+PUBLISH_MODES = ["post", "ask", "never"]  # post < ask < never: later entries are safer
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,11 @@ class Policy:
     max_tool_result_chars: int = 24_000
     post_comment: bool = True
     post_inline: bool = False
-    dry_run: bool = False
+    publish: str = "post"  # post | ask | never
+
+    @property
+    def dry_run(self) -> bool:
+        return self.publish == "never"
 
     def tighten(self, **requested) -> tuple[Policy, list[str]]:
         """Apply requested values that are at least as safe as the floor; return (policy, rejected)."""
@@ -49,11 +54,11 @@ class Policy:
                     new = replace(new, **{key: bool(value)})
                 else:
                     rejected.append(f"{key} is disabled by the operator")
-            elif key == "dry_run":
-                if value or not self.dry_run:
-                    new = replace(new, dry_run=bool(value))
+            elif key == "publish":
+                if PUBLISH_MODES.index(value) >= PUBLISH_MODES.index(self.publish):
+                    new = replace(new, publish=value)
                 else:
-                    rejected.append("dry_run is enforced by the operator")
+                    rejected.append(f"publish={value} is looser than the operator floor {self.publish}")
             else:
                 raise KeyError(key)
         return new, rejected

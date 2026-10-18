@@ -9,7 +9,7 @@ import json
 import os
 from dataclasses import dataclass, field
 
-from .policy import LOCKDOWN_LEVELS, Policy
+from .policy import LOCKDOWN_LEVELS, PUBLISH_MODES, Policy
 
 SEVERITY_RANK = {"none": 0, "suggestion": 1, "low": 2, "medium": 3, "high": 4, "critical": 5}
 
@@ -72,7 +72,12 @@ class ReviewConfig:
     comment_tag: str = "zephyr-reviewer"
     show_run_details: bool = False
     fail_on_severity: str = "none"
-    dry_run: bool = False
+    publish: str = "post"  # post | ask | never
+
+    @property
+    def dry_run(self) -> bool:
+        return self.publish == "never"
+
     in_process_server: bool = False
     output_dir: str = "review-output"
 
@@ -120,7 +125,9 @@ class ReviewConfig:
         cfg.comment_tag = _env("comment_tag", cfg.comment_tag)
         cfg.show_run_details = _bool(_env("show_run_details"), False)
         cfg.fail_on_severity = _env("fail_on_severity", "none").strip().lower() or "none"
-        cfg.dry_run = _bool(_env("dry_run"), False)
+        cfg.publish = _env("publish", "post").strip().lower() or "post"
+        if _bool(_env("dry_run"), False):
+            cfg.publish = "never"
         cfg.output_dir = _env("output_dir", cfg.output_dir)
         cfg.skip_labels = _list(_env("skip_labels", ",".join(cfg.skip_labels)))
         cfg.required_labels = _list(_env("required_labels"))
@@ -131,6 +138,8 @@ class ReviewConfig:
         errors = []
         if not self.openrouter_api_key:
             errors.append("OpenRouter API key missing (--api-key, OPENROUTER_API_KEY or INPUT_OPENROUTER_API_KEY)")
+        if self.publish not in PUBLISH_MODES:
+            errors.append(f"publish must be one of {', '.join(PUBLISH_MODES)}")
         if self.lockdown not in LOCKDOWN_LEVELS:
             errors.append(f"lockdown must be one of {', '.join(LOCKDOWN_LEVELS)}")
         if self.fail_on_severity not in SEVERITY_RANK:
@@ -154,7 +163,7 @@ class ReviewConfig:
             max_tool_result_chars=self.max_tool_result_chars,
             post_comment=self.post_comment,
             post_inline=self.post_inline,
-            dry_run=self.dry_run,
+            publish=self.publish,
         )
 
     def apply_policy(self, policy: Policy) -> None:
@@ -164,4 +173,4 @@ class ReviewConfig:
         self.max_tool_result_chars = policy.max_tool_result_chars
         self.post_comment = policy.post_comment
         self.post_inline = policy.post_inline
-        self.dry_run = policy.dry_run
+        self.publish = policy.publish

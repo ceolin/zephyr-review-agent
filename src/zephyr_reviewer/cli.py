@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import subprocess
 import sys
 
@@ -63,7 +64,11 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--inline", action="store_true", help="Also post findings as inline review comments")
     p.add_argument("--no-comment", action="store_true", help="Do not post or update the summary comment")
     p.add_argument("--fail-on-severity", choices=["none", "suggestion", "low", "medium", "high", "critical"])
-    p.add_argument("--dry-run", action="store_true", help="Run the review but print instead of posting")
+    p.add_argument("--dry-run", action="store_true", help="Run the review but print instead of posting (publish=never)")
+    p.add_argument("--ask", action="store_true", help="Show the review and ask before posting (publish=ask)")
+    p.add_argument(
+        "--publish", choices=["post", "ask", "never"], help="Posting mode; can only tighten the operator setting"
+    )
     p.add_argument("--in-process", action="store_true", help="Run the MCP server in-process instead of over stdio")
     p.add_argument("--output-dir", help="Where to write comment.md, review.json, transcript.jsonl")
 
@@ -119,7 +124,7 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         max_context_tokens=args.max_context_tokens,
         post_inline=True if args.inline else None,
         post_comment=False if args.no_comment else None,
-        dry_run=True if args.dry_run else None,
+        publish="never" if args.dry_run else ("ask" if args.ask else args.publish),
     )
     for r in rejected:
         log(f"::warning::ignored: {r}")
@@ -341,17 +346,68 @@ def cmd_review(args: argparse.Namespace) -> int:
         log("::error::" + "; ".join(run.errors))
     out_dir = pub.save_artifacts(cfg.output_dir, run, body, pr, cfg)
     log(f"artifacts in {out_dir}")
-    outputs = pub.publish(cfg, gh, pr, run, body, log=log)
+    confirm = _interactive_confirm(cfg.output_dir, pr) if cfg.publish == "ask" and _has_terminal() else None
+    outputs = pub.publish(cfg, gh, pr, run, body, log=log, confirm=confirm)
     pub.write_outputs(outputs)
     pub.write_summary(body + "\n\n" + run_details(run, pr))  # the step summary always carries the run details
     log(run_details(run, pr))
-    if cfg.dry_run or gh is None:
+    if outputs.get("posted") != "true" and confirm is None:
         print(body)
     failure = pub.gate_fails(run, cfg)
     if failure:
         log(f"::error::review gate failed: {failure}")
         return 1
     return 0
+
+
+def _has_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stderr.isatty()
+
+
+def _interactive_confirm(output_dir: str, pr: PullRequest):
+    """Show the rendered comment and ask: post it, skip, or edit comment.md first."""
+    path = os.path.join(output_dir, "comment.md")
+
+    def confirm(body: str, n_inline: int) -> tuple[bool, str]:
+        while True:
+            print("\n" + body + "\n", file=sys.stderr)
+            what = "the summary comment" + (f" and {n_inline} inline comment(s)" if n_inline else "")
+            target = f"PR #{pr.number}" if pr.number else "the pull request"
+            try:
+                answer = input(f"Post {what} to {target}? [y]es / [n]o / [e]dit comment.md: ").strip().lower()
+            except EOFError:
+                return False, body
+            if answer in ("y", "yes"):
+                return True, body
+            if answer in ("n", "no", ""):
+                return False, body
+            if answer in ("e", "edit"):
+                editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+                subprocess.call([*editor.split(), path])
+                with open(path, encoding="utf-8") as fh:
+                    body = fh.read()
+                continue
+            print("please answer y, n or e", file=sys.stderr)
+
+    return confirm
+
+
+def cmd_post(args: argparse.Namespace) -> int:
+    repo = args.repository or os.environ.get("GITHUB_REPOSITORY", "")
+    record, _ = pub.load_saved(args.output_dir)
+    repo = repo or record.get("repo") or ""
+    token = args.github_token or os.environ.get("GITHUB_TOKEN", "")
+    if not repo or not token:
+        log("::error::a repository (--repository or review.json) and a GitHub token are required")
+        return 2
+    gh = GitHub(token, repo, os.environ.get("GITHUB_API_URL", "https://api.github.com"))
+    pr = PullRequest(int(record.get("pr") or 0), "", "", "", "", "", "", record.get("head_sha") or "", "", False)
+    confirm = None if args.yes else (_interactive_confirm(args.output_dir, pr) if _has_terminal() else None)
+    if confirm is None and not args.yes:
+        log("::error::no terminal to confirm on; pass --yes to post without asking")
+        return 2
+    out = pub.post_saved(args.output_dir, gh, inline=args.inline, tag=args.comment_tag, log=log, confirm=confirm)
+    return 0 if out.get("posted") == "true" else 1
 
 
 # ----------------------------------------------------------------------------- tools
@@ -402,6 +458,15 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("review", help="Review a pull request (or a local range) and publish the result")
     _add_review_args(r)
     r.set_defaults(fn=cmd_review)
+
+    o = sub.add_parser("post", help="Publish a review saved by an earlier run (after reading or editing comment.md)")
+    o.add_argument("--output-dir", default="review-output", help="Directory holding review.json and comment.md")
+    o.add_argument("--repository", help="GitHub owner/name (default: from review.json or $GITHUB_REPOSITORY)")
+    o.add_argument("--github-token", help="GitHub token (default: $GITHUB_TOKEN)")
+    o.add_argument("--inline", action="store_true", help="Also post anchored findings as inline review comments")
+    o.add_argument("--comment-tag", default="zephyr-reviewer")
+    o.add_argument("--yes", action="store_true", help="Post without asking")
+    o.set_defaults(fn=cmd_post)
 
     t = sub.add_parser("tools", help="List the MCP tools as the model sees them")
     t.add_argument("--repo", default=".")

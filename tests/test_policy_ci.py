@@ -21,8 +21,8 @@ from zephyr_reviewer.review.prompts import opening_message
 
 
 def test_policy_only_tightens():
-    floor = Policy(lockdown="label", max_steps=40, post_inline=False, dry_run=False)
-    p, rejected = floor.tighten(lockdown="strict", max_steps=10, dry_run=True, post_comment=False)
+    floor = Policy(lockdown="label", max_steps=40, post_inline=False, publish="post")
+    p, rejected = floor.tighten(lockdown="strict", max_steps=10, publish="never", post_comment=False)
     assert (p.lockdown, p.max_steps, p.dry_run, p.post_comment) == ("strict", 10, True, False) and rejected == []
     p, rejected = floor.tighten(lockdown="off", max_steps=100, post_inline=True)
     assert p == floor
@@ -31,9 +31,9 @@ def test_policy_only_tightens():
         "max_steps=100 exceeds the operator floor 40",
         "post_inline is disabled by the operator",
     ]
-    enforced = Policy(dry_run=True)
-    p, rejected = enforced.tighten(dry_run=False)
-    assert p.dry_run and rejected == ["dry_run is enforced by the operator"]
+    enforced = Policy(publish="never")
+    p, rejected = enforced.tighten(publish="post")
+    assert p.dry_run and rejected == ["publish=post is looser than the operator floor never"]
     # None means "not requested".
     assert floor.tighten(lockdown=None, max_steps=None) == (floor, [])
     with pytest.raises(KeyError):
@@ -51,7 +51,7 @@ def test_config_round_trips_policy(monkeypatch):
         max_tool_result_chars=24_000,
         post_comment=True,
         post_inline=False,
-        dry_run=False,
+        publish="post",
     )
     monkeypatch.setenv("INPUT_LOCKDOWN", "nope")
     assert any("lockdown must be one of" in e for e in ReviewConfig.from_env().validate())

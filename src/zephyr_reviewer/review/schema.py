@@ -220,6 +220,21 @@ class Review:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Review:
+        findings = [Finding(**f) for f in d.get("findings") or []]
+        plan = [TestPlanEntry(**e) for e in d.get("test_plan") or []]
+        return cls(
+            summary=d.get("summary") or "",
+            verdict=d.get("verdict") or "comment",
+            confidence=d.get("confidence") or "medium",
+            findings=findings,
+            test_assessment=d.get("test_assessment") or "",
+            commit_message_assessment=d.get("commit_message_assessment") or "",
+            discussion_assessment=d.get("discussion_assessment") or "",
+            test_plan=plan,
+        )
+
 
 _ALL_CLEAR = re.compile(
     r"^(none|n/?a|no (issues?|problems?|concerns?|gaps?|changes? (needed|required))"

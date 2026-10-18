@@ -8,6 +8,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,11 @@ from .agent import RunResult
 from .config import SEVERITY_RANK, ReviewConfig
 from .github_api import GitHub, PullRequest
 from .render import inline_comments, marker
+from .schema import Review
+
+# Called in "ask" mode with the rendered comment and the number of inline comments; returns
+# (post it?, body to post). The CLI provides an interactive one; a non-interactive job gets none.
+ConfirmFn = Callable[[str, int], tuple[bool, str]]
 
 
 def write_outputs(values: dict[str, Any]) -> None:
@@ -72,7 +78,13 @@ def gate_fails(run: RunResult, cfg: ReviewConfig) -> str | None:
 
 
 def publish(
-    cfg: ReviewConfig, gh: GitHub | None, pr: PullRequest, run: RunResult, body: str, log=print
+    cfg: ReviewConfig,
+    gh: GitHub | None,
+    pr: PullRequest,
+    run: RunResult,
+    body: str,
+    log=print,
+    confirm: ConfirmFn | None = None,
 ) -> dict[str, Any]:
     outputs: dict[str, Any] = {
         "verdict": run.review.verdict if run.review else "error",
@@ -81,22 +93,81 @@ def publish(
         "test_plan_count": len(run.review.test_plan) if run.review else 0,
         "comment_url": "",
         "review_url": "",
+        "posted": "false",
         "skipped": "false",
     }
-    if cfg.dry_run or gh is None or not pr.number:
-        log("dry run: not posting to GitHub")
+    if gh is None or not pr.number:
+        log("no pull request: nothing to post")
         return outputs
-    if cfg.post_comment:
-        outputs["comment_url"] = gh.upsert_comment(pr.number, body, marker(cfg.comment_tag))
-        log(f"comment: {outputs['comment_url']}")
-    if cfg.post_inline and run.review is not None:
-        comments = inline_comments(run.review)
-        if comments:
-            try:
-                outputs["review_url"] = gh.create_review(
-                    pr.number, pr.head_sha, comments, body=f"{len(comments)} inline note(s) from the AI review."
-                )
-                log(f"inline review: {outputs['review_url']} ({len(comments)} comment(s))")
-            except Exception as exc:  # noqa: BLE001 - inline anchoring can be rejected; the summary already landed
-                log(f"::warning::inline review rejected: {exc}")
+    if cfg.publish == "never":
+        log("publish=never: not posting to GitHub")
+        return outputs
+    inline = inline_comments(run.review) if (cfg.post_inline and run.review is not None) else []
+    if cfg.publish == "ask":
+        if confirm is None:
+            log(
+                f"::notice::publish=ask without a terminal: the review was saved, not posted. Read it, then publish "
+                f"with: zephyr-reviewer post --output-dir {cfg.output_dir} --repository {cfg.repo_slug}"
+            )
+            return outputs
+        ok, body = confirm(body, len(inline))
+        if not ok:
+            log("not posted")
+            return outputs
+    posted = _post(gh, pr.number, pr.head_sha, body, inline, cfg.post_comment, cfg.comment_tag, log)
+    outputs.update(posted)
     return outputs
+
+
+def _post(
+    gh: GitHub, number: int, head_sha: str, body: str, inline: list[dict[str, Any]], post_comment: bool, tag: str, log
+) -> dict[str, Any]:
+    out: dict[str, Any] = {"comment_url": "", "review_url": "", "posted": "false"}
+    if post_comment:
+        out["comment_url"] = gh.upsert_comment(number, body, marker(tag))
+        out["posted"] = "true"
+        log(f"comment: {out['comment_url']}")
+    if inline:
+        try:
+            out["review_url"] = gh.create_review(
+                number, head_sha, inline, body=f"{len(inline)} inline note(s) from the AI review."
+            )
+            out["posted"] = "true"
+            log(f"inline review: {out['review_url']} ({len(inline)} comment(s))")
+        except Exception as exc:  # noqa: BLE001 - inline anchoring can be rejected; the summary already landed
+            log(f"::warning::inline review rejected: {exc}")
+    return out
+
+
+def load_saved(output_dir: str) -> tuple[dict[str, Any], str]:
+    """The record and comment a previous run saved with save_artifacts."""
+    d = Path(output_dir)
+    record = json.loads((d / "review.json").read_text(encoding="utf-8"))
+    body = (d / "comment.md").read_text(encoding="utf-8")
+    return record, body
+
+
+def post_saved(
+    output_dir: str,
+    gh: GitHub,
+    *,
+    inline: bool,
+    tag: str,
+    log=print,
+    confirm: ConfirmFn | None = None,
+) -> dict[str, Any]:
+    """Publish a saved review (possibly edited in comment.md) to the pull request it was written for."""
+    record, body = load_saved(output_dir)
+    number = int(record.get("pr") or 0)
+    if not number:
+        raise SystemExit(f"{output_dir}/review.json does not belong to a pull request")
+    if marker(tag) not in body:
+        body = marker(tag) + "\n" + body
+    review = Review.from_dict(record["review"]) if record.get("review") else None
+    comments = inline_comments(review) if (inline and review is not None) else []
+    if confirm is not None:
+        ok, body = confirm(body, len(comments))
+        if not ok:
+            log("not posted")
+            return {"posted": "false"}
+    return _post(gh, number, record.get("head_sha") or "", body, comments, True, tag, log)
