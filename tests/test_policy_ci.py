@@ -50,7 +50,7 @@ def test_config_round_trips_policy(monkeypatch):
         max_context_tokens=160_000,
         max_tool_result_chars=24_000,
         post_comment=True,
-        post_inline=False,
+        post_inline=True,
         publish="post",
     )
     monkeypatch.setenv("INPUT_LOCKDOWN", "nope")

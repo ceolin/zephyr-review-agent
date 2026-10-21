@@ -47,7 +47,9 @@ first, then submit. Concretely:
 - Finish by calling `{submit}` exactly once. Do not write the review as prose; the tool call is the
   review. `line` must be a line on the new side of the diff, or 0 for findings that are not anchored
   to one changed line (architecture, missing tests, cross-file behavior); those appear in the summary
-  only. Write all prose in {language}.\
+  only. Anchored findings are posted as inline comments at the cited line, so make each one
+  self-contained: `problem`, `trigger`, `impact` and `recommendation` must read on their own
+  without the summary. Write all prose in {language}.\
 """
 
 

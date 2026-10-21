@@ -68,9 +68,11 @@ def test_never_and_ask_without_terminal_do_not_post():
     run, pr = _run()
     seen: list = []
     logs: list[str] = []
-    out = pub.publish(ReviewConfig(publish="never"), _gh(seen), pr, run, "body", log=logs.append)
+    out = pub.publish(ReviewConfig(publish="never"), _gh(seen), pr, run, lambda e: "body", log=logs.append)
     assert out["posted"] == "false" and seen == []
-    out = pub.publish(ReviewConfig(publish="ask", repo_slug="o/r"), _gh(seen), pr, run, "body", log=logs.append)
+    out = pub.publish(
+        ReviewConfig(publish="ask", repo_slug="o/r"), _gh(seen), pr, run, lambda e: "body", log=logs.append
+    )
     assert out["posted"] == "false" and seen == []
     assert any("zephyr-reviewer post --output-dir review-output --repository o/r" in m for m in logs)
 
@@ -85,13 +87,13 @@ def test_ask_posts_only_when_confirmed_and_uses_the_edited_body():
         return False, body
 
     cfg = ReviewConfig(publish="ask", post_inline=True)
-    out = pub.publish(cfg, _gh(seen), pr, run, "original", log=lambda m: None, confirm=decline)
+    out = pub.publish(cfg, _gh(seen), pr, run, lambda e: "original", log=lambda m: None, confirm=decline)
     assert out["posted"] == "false" and seen == [] and asked == [("original", 2)]
 
     def accept_edited(body, n_inline):
         return True, body + "\nedited by a human"
 
-    out = pub.publish(cfg, _gh(seen), pr, run, "original", log=lambda m: None, confirm=accept_edited)
+    out = pub.publish(cfg, _gh(seen), pr, run, lambda e: "original", log=lambda m: None, confirm=accept_edited)
     assert out["posted"] == "true" and out["comment_url"].endswith("issuecomment-9")
     posted = [b for m, p, b in seen if m == "POST" and p.endswith("/issues/7/comments")][0]
     assert posted["body"] == "original\nedited by a human"
@@ -102,7 +104,11 @@ def test_ask_posts_only_when_confirmed_and_uses_the_edited_body():
 def test_post_saved_review_round_trip(tmp_path):
     run, pr = _run()
     cfg = ReviewConfig(repo_slug="o/r", output_dir=str(tmp_path / "out"), comment_tag="zephyr-reviewer")
-    pub.save_artifacts(cfg.output_dir, run, "<!-- zephyr-reviewer -->\nsaved body", pr, cfg)
+    from zephyr_reviewer.review.render import inline_comments
+
+    pub.save_artifacts(
+        cfg.output_dir, run, "<!-- zephyr-reviewer -->\nsaved body", pr, cfg, inline_comments(run.review)
+    )
     record, body = pub.load_saved(cfg.output_dir)
     assert record["pr"] == 7 and record["repo"] == "o/r" and body.endswith("saved body")
     assert Review.from_dict(record["review"]).findings[0].inline  # inline anchoring survives the round trip

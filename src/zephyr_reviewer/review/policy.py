@@ -23,7 +23,7 @@ class Policy:
     max_context_tokens: int = 160_000
     max_tool_result_chars: int = 24_000
     post_comment: bool = True
-    post_inline: bool = False
+    post_inline: bool = True
     publish: str = "post"  # post | ask | never
 
     @property

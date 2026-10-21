@@ -14,13 +14,14 @@ from typing import Any
 
 from .agent import RunResult
 from .config import SEVERITY_RANK, ReviewConfig
-from .github_api import GitHub, PullRequest
-from .render import inline_comments, marker
-from .schema import Review
+from .github_api import GitHub, GitHubError, PullRequest
+from .render import inline_comments, inline_marker, marker
 
 # Called in "ask" mode with the rendered comment and the number of inline comments; returns
 # (post it?, body to post). The CLI provides an interactive one; a non-interactive job gets none.
 ConfirmFn = Callable[[str, int], tuple[bool, str]]
+# Renders the top-level comment; the argument says whether anchored findings are left to inline comments.
+RenderFn = Callable[[bool], str]
 
 
 def write_outputs(values: dict[str, Any]) -> None:
@@ -39,10 +40,19 @@ def write_summary(body: str) -> None:
             fh.write(body + "\n")
 
 
-def save_artifacts(out_dir: str, run: RunResult, body: str, pr: PullRequest, cfg: ReviewConfig) -> Path:
+def save_artifacts(
+    out_dir: str,
+    run: RunResult,
+    body: str,
+    pr: PullRequest,
+    cfg: ReviewConfig,
+    inline: list[dict[str, Any]] | None = None,
+) -> Path:
+    """comment.md is the top-level comment as it would be posted; inline_comments.json the anchored findings."""
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     (d / "comment.md").write_text(body, encoding="utf-8")
+    (d / "inline_comments.json").write_text(json.dumps(inline or [], indent=2), encoding="utf-8")
     record = {
         "pr": pr.number,
         "head_sha": pr.head_sha,
@@ -82,7 +92,7 @@ def publish(
     gh: GitHub | None,
     pr: PullRequest,
     run: RunResult,
-    body: str,
+    render: RenderFn,
     log=print,
     confirm: ConfirmFn | None = None,
 ) -> dict[str, Any]:
@@ -93,16 +103,18 @@ def publish(
         "test_plan_count": len(run.review.test_plan) if run.review else 0,
         "comment_url": "",
         "review_url": "",
+        "inline_count": 0,
         "posted": "false",
         "skipped": "false",
     }
+    inline = inline_comments(run.review, cfg.comment_tag) if (cfg.post_inline and run.review is not None) else []
+    body = render(bool(inline))
     if gh is None or not pr.number:
         log("no pull request: nothing to post")
         return outputs
     if cfg.publish == "never":
         log("publish=never: not posting to GitHub")
         return outputs
-    inline = inline_comments(run.review) if (cfg.post_inline and run.review is not None) else []
     if cfg.publish == "ask":
         if confirm is None:
             log(
@@ -114,29 +126,74 @@ def publish(
         if not ok:
             log("not posted")
             return outputs
-    posted = _post(gh, pr.number, pr.head_sha, body, inline, cfg.post_comment, cfg.comment_tag, log)
+    posted = _post(gh, pr.number, pr.head_sha, body, inline, cfg.post_comment, cfg.comment_tag, log, render)
     outputs.update(posted)
     return outputs
 
 
 def _post(
-    gh: GitHub, number: int, head_sha: str, body: str, inline: list[dict[str, Any]], post_comment: bool, tag: str, log
+    gh: GitHub,
+    number: int,
+    head_sha: str,
+    body: str,
+    inline: list[dict[str, Any]],
+    post_comment: bool,
+    tag: str,
+    log,
+    render: RenderFn | None = None,
 ) -> dict[str, Any]:
-    out: dict[str, Any] = {"comment_url": "", "review_url": "", "posted": "false"}
+    """Top-level comment first (upserted), then the inline review. If GitHub rejects the inline review
+    the anchored findings are folded back into the top-level comment so nothing is lost."""
+    out: dict[str, Any] = {"comment_url": "", "review_url": "", "inline_count": 0, "posted": "false"}
     if post_comment:
         out["comment_url"] = gh.upsert_comment(number, body, marker(tag))
         out["posted"] = "true"
         log(f"comment: {out['comment_url']}")
     if inline:
-        try:
-            out["review_url"] = gh.create_review(
-                number, head_sha, inline, body=f"{len(inline)} inline note(s) from the AI review."
-            )
-            out["posted"] = "true"
-            log(f"inline review: {out['review_url']} ({len(inline)} comment(s))")
-        except Exception as exc:  # noqa: BLE001 - inline anchoring can be rejected; the summary already landed
-            log(f"::warning::inline review rejected: {exc}")
+        fresh = _without_already_posted(gh, number, inline, tag, log)
+        if fresh:
+            try:
+                out["review_url"] = gh.create_review(
+                    number, head_sha, fresh, body=f"{len(fresh)} inline note(s) from the AI review."
+                )
+                out["inline_count"] = len(fresh)
+                out["posted"] = "true"
+                log(f"inline review: {out['review_url']} ({len(fresh)} comment(s))")
+            except GitHubError as exc:
+                log(f"::warning::inline review rejected ({exc}); folding the findings into the summary comment")
+                if post_comment and render is not None:
+                    out["comment_url"] = gh.upsert_comment(number, render(False), marker(tag))
     return out
+
+
+def _without_already_posted(
+    gh: GitHub, number: int, inline: list[dict[str, Any]], tag: str, log
+) -> list[dict[str, Any]]:
+    """Drop inline comments whose marker is already on the pull request from an earlier run."""
+    try:
+        existing = gh.review_comments(number)
+    except GitHubError:
+        return inline
+    prefix = inline_marker(tag, "")[:-4]  # "<!-- tag:finding:"
+    seen = {m for c in existing for m in _markers((c.get("body") or ""), prefix)}
+    fresh = [c for c in inline if not any(m in seen for m in _markers(c["body"], prefix))]
+    if len(fresh) < len(inline):
+        log(f"{len(inline) - len(fresh)} inline comment(s) already posted by an earlier run; skipping them")
+    return fresh
+
+
+def _markers(body: str, prefix: str) -> list[str]:
+    out = []
+    pos = 0
+    while True:
+        i = body.find(prefix, pos)
+        if i == -1:
+            return out
+        j = body.find("-->", i)
+        if j == -1:
+            return out
+        out.append(body[i : j + 3])
+        pos = j + 3
 
 
 def load_saved(output_dir: str) -> tuple[dict[str, Any], str]:
@@ -156,15 +213,17 @@ def post_saved(
     log=print,
     confirm: ConfirmFn | None = None,
 ) -> dict[str, Any]:
-    """Publish a saved review (possibly edited in comment.md) to the pull request it was written for."""
+    """Publish a saved review (comment.md and inline_comments.json, both editable) to its pull request."""
     record, body = load_saved(output_dir)
     number = int(record.get("pr") or 0)
     if not number:
         raise SystemExit(f"{output_dir}/review.json does not belong to a pull request")
     if marker(tag) not in body:
         body = marker(tag) + "\n" + body
-    review = Review.from_dict(record["review"]) if record.get("review") else None
-    comments = inline_comments(review) if (inline and review is not None) else []
+    comments: list[dict[str, Any]] = []
+    inline_path = Path(output_dir) / "inline_comments.json"
+    if inline and inline_path.exists():
+        comments = json.loads(inline_path.read_text(encoding="utf-8"))
     if confirm is not None:
         ok, body = confirm(body, len(comments))
         if not ok:

@@ -70,8 +70,8 @@ export GITHUB_TOKEN=$(gh auth token)
 zephyr-reviewer review --repo ~/zephyrproject/zephyr --repository zephyrproject-rtos/zephyr --pr 12345 --dry-run
 ```
 
-Drop `--dry-run` to post the comment; add `--inline` to also attach anchored findings to the
-changed lines. `--ask` shows the finished review and prompts before anything is posted, with an
+Drop `--dry-run` to post. Anchored findings go inline by default; `--no-inline` puts everything in
+the top-level comment. `--ask` shows the finished review and prompts before anything is posted, with an
 option to edit `comment.md` first:
 
 ```
@@ -88,7 +88,7 @@ read it:
 zephyr-reviewer post --output-dir review-output --repository zephyrproject-rtos/zephyr [--inline]
 ```
 
-`post` reads `review.json` and `comment.md` from the directory, so the comment can be edited or
+`post` reads `comment.md` and `inline_comments.json` from the directory, so both can be edited or
 trimmed first, asks for confirmation (or `--yes`), and publishes with the same hidden marker so a
 later run updates it in place. This is the shape Zephyr's AI policy asks for: a human reads the
 model's output before it reaches the pull request. Like the other safety settings, `publish` can
@@ -146,9 +146,15 @@ nothing from the tree is executed. That is what makes it safe to run on a fork's
    Findings are validated: a `line` must be on the new side of the diff to become an inline
    comment, otherwise it is demoted to the summary with a note; a file outside the diff is demoted
    too; a malformed submission is rejected with reasons and the model retries.
-6. The comment is rendered and upserted (one comment per PR, found by a hidden marker), inline
-   comments are posted as a review when enabled, action outputs are set, and `review-output/`
-   receives `comment.md`, `review.json` and `transcript.jsonl`.
+6. Findings anchored to a changed line are posted as inline review comments at that line, each
+   self-contained with problem, trigger, impact, recommendation and a committable suggestion. The
+   top-level comment (one per PR, updated in place through a hidden marker) carries the verdict,
+   summary, test gaps, commit-message and discussion issues, the test plan, and any finding that
+   could not be anchored. A re-run skips inline comments it already posted for the same finding at
+   the same location, so threads stay single. If GitHub rejects the inline review, the findings
+   are folded back into the top-level comment. `post_inline_comments: "false"` puts everything in
+   the top-level comment. `review-output/` receives `comment.md`, `inline_comments.json`,
+   `review.json` and `transcript.jsonl`.
 
 ### Test plan (option)
 

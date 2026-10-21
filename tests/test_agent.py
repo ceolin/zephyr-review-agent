@@ -356,6 +356,8 @@ def test_publish_upserts_comment_and_posts_inline_review(mini_repo, tmp_path, mo
         seen.append((request.method, request.url.path, body))
         if request.method == "GET" and request.url.path.endswith("/issues/7/comments"):
             return httpx.Response(200, json=[{"id": 42, "body": "<!-- zephyr-reviewer -->\nold"}])
+        if request.method == "GET" and request.url.path.endswith("/pulls/7/comments"):
+            return httpx.Response(200, json=[])
         if request.method == "PATCH":
             return httpx.Response(200, json={"html_url": "https://github.com/o/r/pull/7#issuecomment-42"})
         if request.url.path.endswith("/reviews"):
@@ -375,7 +377,7 @@ def test_publish_upserts_comment_and_posts_inline_review(mini_repo, tmp_path, mo
     out_file = tmp_path / "outputs.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out_file))
 
-    outputs = pub.publish(cfg, gh, pr, run, "<!-- zephyr-reviewer -->\nnew", log=lambda m: None)
+    outputs = pub.publish(cfg, gh, pr, run, lambda exclude: "<!-- zephyr-reviewer -->\nnew", log=lambda m: None)
     pub.write_outputs(outputs)
     pub.save_artifacts(cfg.output_dir, run, "body", pr, cfg)
 

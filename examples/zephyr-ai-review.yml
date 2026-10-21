@@ -50,7 +50,6 @@ jobs:
           fallback_models: openai/gpt-4.1,google/gemini-2.5-pro
           provider: '{"data_collection": "deny"}'
           required_labels: ai-review
-          post_inline_comments: "false"
           max_steps: "40"
 
       - name: Upload review artifacts

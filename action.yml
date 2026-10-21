@@ -137,9 +137,12 @@ inputs:
     required: false
     default: "true"
   post_inline_comments:
-    description: "Also attach anchored findings as inline review comments."
+    description: >-
+      Post each finding anchored to a changed line as an inline review comment at that line, keeping
+      the top-level comment for the overall assessment and unanchored findings. `false` puts every
+      finding in the top-level comment.
     required: false
-    default: "false"
+    default: "true"
   show_run_details:
     description: >-
       Append the run details (models, steps, tool calls, tokens, cost, time) to the posted comment.
@@ -185,6 +188,9 @@ outputs:
     value: ${{ steps.review.outputs.comment_url }}
   review_url:
     value: ${{ steps.review.outputs.review_url }}
+  inline_count:
+    description: "Number of inline review comments posted."
+    value: ${{ steps.review.outputs.inline_count }}
   posted:
     description: "true when something was posted to the pull request."
     value: ${{ steps.review.outputs.posted }}

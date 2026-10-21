@@ -68,7 +68,7 @@ class ReviewConfig:
     github_token: str = ""
     github_api_url: str = "https://api.github.com"
     post_comment: bool = True
-    post_inline: bool = False
+    post_inline: bool = True
     comment_tag: str = "zephyr-reviewer"
     show_run_details: bool = False
     fail_on_severity: str = "none"
@@ -121,7 +121,7 @@ class ReviewConfig:
         cfg.github_token = _env("github_token", os.environ.get("GITHUB_TOKEN", ""))
         cfg.github_api_url = os.environ.get("GITHUB_API_URL", cfg.github_api_url)
         cfg.post_comment = _bool(_env("post_comment"), True)
-        cfg.post_inline = _bool(_env("post_inline_comments"), False)
+        cfg.post_inline = _bool(_env("post_inline_comments"), True)
         cfg.comment_tag = _env("comment_tag", cfg.comment_tag)
         cfg.show_run_details = _bool(_env("show_run_details"), False)
         cfg.fail_on_severity = _env("fail_on_severity", "none").strip().lower() or "none"

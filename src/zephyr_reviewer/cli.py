@@ -61,7 +61,8 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--show-details", action="store_true", help="Append models, steps, tokens, cost and time to the posted comment"
     )
-    p.add_argument("--inline", action="store_true", help="Also post findings as inline review comments")
+    p.add_argument("--inline", action="store_true", help="Post anchored findings as inline review comments (default)")
+    p.add_argument("--no-inline", action="store_true", help="Put every finding in the top-level comment instead")
     p.add_argument("--no-comment", action="store_true", help="Do not post or update the summary comment")
     p.add_argument("--fail-on-severity", choices=["none", "suggestion", "low", "medium", "high", "critical"])
     p.add_argument("--dry-run", action="store_true", help="Run the review but print instead of posting (publish=never)")
@@ -122,7 +123,7 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         lockdown=args.lockdown,
         max_steps=args.max_steps,
         max_context_tokens=args.max_context_tokens,
-        post_inline=True if args.inline else None,
+        post_inline=False if args.no_inline else (True if args.inline else None),
         post_comment=False if args.no_comment else None,
         publish="never" if args.dry_run else ("ask" if args.ask else args.publish),
     )
