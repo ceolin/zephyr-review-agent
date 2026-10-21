@@ -24,7 +24,7 @@ from .review.github_api import GitHub, PullRequest, pr_number_from_event
 from .review.mcp_client import ToolBridge, stdio_params
 from .review.openrouter import OpenRouter
 from .review.prompts import load_profile, opening_message, system_prompt
-from .review.render import render_comment, render_failure, run_details
+from .review.render import inline_comments, render_comment, render_failure, run_details
 from .review.stages import run_two_stage
 
 
@@ -333,22 +333,34 @@ def cmd_review(args: argparse.Namespace) -> int:
         flagged = sum(1 for e in run.review.test_plan if e.notes)
         log(f"test plan: {len(run.review.test_plan)} entries, {flagged} flagged by validation")
     if run.review is not None:
-        body = render_comment(
-            run.review,
-            run,
-            pr,
-            repo=cfg.repo_slug,
-            tag=cfg.comment_tag,
-            api_url=cfg.github_api_url,
-            details=cfg.show_run_details,
-        )
+        review = run.review
+
+        def render(exclude_inline: bool) -> str:
+            return render_comment(
+                review,
+                run,
+                pr,
+                repo=cfg.repo_slug,
+                tag=cfg.comment_tag,
+                api_url=cfg.github_api_url,
+                details=cfg.show_run_details,
+                exclude_inline=exclude_inline,
+            )
+
+        inline = inline_comments(review, cfg.comment_tag) if cfg.post_inline else []
     else:
-        body = render_failure(run, pr, cfg.comment_tag)
+        failure_body = render_failure(run, pr, cfg.comment_tag)
         log("::error::" + "; ".join(run.errors))
-    out_dir = pub.save_artifacts(cfg.output_dir, run, body, pr, cfg)
-    log(f"artifacts in {out_dir}")
+
+        def render(exclude_inline: bool) -> str:
+            return failure_body
+
+        inline = []
+    body = render(bool(inline))
+    out_dir = pub.save_artifacts(cfg.output_dir, run, body, pr, cfg, inline)
+    log(f"artifacts in {out_dir}" + (f" ({len(inline)} inline comment(s))" if inline else ""))
     confirm = _interactive_confirm(cfg.output_dir, pr) if cfg.publish == "ask" and _has_terminal() else None
-    outputs = pub.publish(cfg, gh, pr, run, body, log=log, confirm=confirm)
+    outputs = pub.publish(cfg, gh, pr, run, render, log=log, confirm=confirm)
     pub.write_outputs(outputs)
     pub.write_summary(body + "\n\n" + run_details(run, pr))  # the step summary always carries the run details
     log(run_details(run, pr))
