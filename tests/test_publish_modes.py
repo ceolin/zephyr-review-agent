@@ -82,23 +82,23 @@ def test_ask_posts_only_when_confirmed_and_uses_the_edited_body():
     seen: list = []
     asked: list = []
 
-    def decline(body, n_inline):
-        asked.append((body, n_inline))
-        return False, body
+    def decline(body, inline):
+        asked.append((body, len(inline)))
+        return False, body, inline
 
     cfg = ReviewConfig(publish="ask", post_inline=True)
     out = pub.publish(cfg, _gh(seen), pr, run, lambda e: "original", log=lambda m: None, confirm=decline)
     assert out["posted"] == "false" and seen == [] and asked == [("original", 2)]
 
-    def accept_edited(body, n_inline):
-        return True, body + "\nedited by a human"
+    def accept_edited(body, inline):
+        return True, body + "\nedited by a human", inline[:1]  # a human drops the second inline comment
 
     out = pub.publish(cfg, _gh(seen), pr, run, lambda e: "original", log=lambda m: None, confirm=accept_edited)
     assert out["posted"] == "true" and out["comment_url"].endswith("issuecomment-9")
     posted = [b for m, p, b in seen if m == "POST" and p.endswith("/issues/7/comments")][0]
     assert posted["body"] == "original\nedited by a human"
     review_req = [b for m, p, b in seen if p.endswith("/reviews")][0]
-    assert len(review_req["comments"]) == 2 and review_req["commit_id"] == "h" * 40
+    assert len(review_req["comments"]) == 1 and review_req["commit_id"] == "h" * 40
 
 
 def test_post_saved_review_round_trip(tmp_path):
@@ -123,7 +123,7 @@ def test_post_saved_review_round_trip(tmp_path):
     assert len([b for m, p, b in seen if p.endswith("/reviews")][0]["comments"]) == 2
 
     declined = pub.post_saved(
-        cfg.output_dir, _gh([]), inline=False, tag="t", log=lambda m: None, confirm=lambda b, n: (False, b)
+        cfg.output_dir, _gh([]), inline=False, tag="t", log=lambda m: None, confirm=lambda b, i: (False, b, i)
     )
     assert declined == {"posted": "false"}
 
@@ -131,6 +131,17 @@ def test_post_saved_review_round_trip(tmp_path):
 def test_interactive_confirm_answers_and_edit(tmp_path, monkeypatch, capsys):
     comment = tmp_path / "comment.md"
     comment.write_text("draft\n", encoding="utf-8")
+    inline = [
+        {
+            "path": "a.c",
+            "line": 19,
+            "start_line": 17,
+            "side": "RIGHT",
+            "body": "<!-- t:finding:x -->\n**Lock leak**\nbody",
+        },
+        {"path": "b/Kconfig", "line": 20, "side": "RIGHT", "body": "<!-- t:finding:y -->\n**Bad select**"},
+    ]
+    (tmp_path / "inline_comments.json").write_text(json.dumps(inline), encoding="utf-8")
     pr = PullRequest(7, "", "", "", "", "", "", "h" * 40, "", False)
     confirm = cli._interactive_confirm(str(tmp_path), pr)
 
@@ -142,26 +153,37 @@ def test_interactive_confirm_answers_and_edit(tmp_path, monkeypatch, capsys):
         return next(answers)
 
     monkeypatch.setattr("builtins.input", fake_input)
-    assert confirm("draft", 2) == (True, "draft")
+    assert confirm("draft", inline) == (True, "draft", inline)
     assert prompts[-1].startswith("Post the summary comment and 2 inline comment(s) to PR #7?")
+    assert "[i] edit inline_comments.json" in prompts[-1]
+    shown = capsys.readouterr().err
+    assert (
+        "### 2 inline comment(s)" in shown and "--- [1] a.c:17-19 ---" in shown and "--- [2] b/Kconfig:20 ---" in shown
+    )
+    assert "**Lock leak**" in shown and "<!-- t:finding" not in shown  # markers are hidden in the preview
 
     answers = iter([""])
-    assert confirm("draft", 0) == (False, "draft")
+    assert confirm("draft", []) == (False, "draft", [])
+    assert "[i]" not in prompts[-1]
 
-    # 'e' runs $EDITOR on comment.md, re-reads it, and asks again.
+    # 'e' edits comment.md; 'i' edits inline_comments.json (here: drop one); both re-read and ask again.
     editor = tmp_path / "ed.sh"
-    editor.write_text("#!/bin/sh\necho 'edited' >> \"$1\"\n", encoding="utf-8")
+    editor.write_text(
+        "#!/bin/sh\ncase \"$1\" in *.md) echo 'edited' >> \"$1\";; *.json) printf '%s' '"
+        + json.dumps(inline[:1]).replace("'", "'\\''")
+        + '\' > "$1";; esac\n',
+        encoding="utf-8",
+    )
     editor.chmod(editor.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("EDITOR", str(editor))
     monkeypatch.delenv("VISUAL", raising=False)
-    answers = iter(["e", "y"])
-    ok, body = confirm("draft", 0)
-    assert ok and body == "draft\nedited\n"
-    assert prompts[-1].startswith("Post the summary comment to PR #7?")
-    assert "draft\nedited" in capsys.readouterr().err  # the edited comment is shown again before asking
+    answers = iter(["e", "i", "y"])
+    ok, body, kept = confirm("draft", inline)
+    assert ok and body == "draft\nedited\n" and kept == inline[:1]
+    assert prompts[-1].startswith("Post the summary comment and 1 inline comment(s) to PR #7?")
 
     answers = iter(["what", "n"])
-    assert confirm("draft", 0) == (False, "draft")
+    assert confirm("draft", inline) == (False, "draft", inline)
 
 
 def test_post_command_requires_a_way_to_confirm(tmp_path, monkeypatch):

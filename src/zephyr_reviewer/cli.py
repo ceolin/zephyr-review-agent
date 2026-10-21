@@ -24,7 +24,7 @@ from .review.github_api import GitHub, PullRequest, pr_number_from_event
 from .review.mcp_client import ToolBridge, stdio_params
 from .review.openrouter import OpenRouter
 from .review.prompts import load_profile, opening_message, system_prompt
-from .review.render import inline_comments, render_comment, render_failure, run_details
+from .review.render import inline_comments, preview_inline, render_comment, render_failure, run_details
 from .review.stages import run_two_stage
 
 
@@ -366,6 +366,8 @@ def cmd_review(args: argparse.Namespace) -> int:
     log(run_details(run, pr))
     if outputs.get("posted") != "true" and confirm is None:
         print(body)
+        if inline:
+            print("\n" + preview_inline(inline))
     failure = pub.gate_fails(run, cfg)
     if failure:
         log(f"::error::review gate failed: {failure}")
@@ -378,29 +380,44 @@ def _has_terminal() -> bool:
 
 
 def _interactive_confirm(output_dir: str, pr: PullRequest):
-    """Show the rendered comment and ask: post it, skip, or edit comment.md first."""
-    path = os.path.join(output_dir, "comment.md")
+    """Show the summary comment and every inline comment; ask to post, skip, or edit either file first."""
+    comment_path = os.path.join(output_dir, "comment.md")
+    inline_path = os.path.join(output_dir, "inline_comments.json")
 
-    def confirm(body: str, n_inline: int) -> tuple[bool, str]:
+    def edit(path: str) -> None:
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+        subprocess.call([*editor.split(), path])
+
+    def confirm(body: str, inline: list[dict]) -> tuple[bool, str, list[dict]]:
         while True:
             print("\n" + body + "\n", file=sys.stderr)
-            what = "the summary comment" + (f" and {n_inline} inline comment(s)" if n_inline else "")
+            if inline:
+                print(preview_inline(inline) + "\n", file=sys.stderr)
+            what = "the summary comment" + (f" and {len(inline)} inline comment(s)" if inline else "")
             target = f"PR #{pr.number}" if pr.number else "the pull request"
+            choices = "[y]es / [n]o / [e]dit comment.md" + (" / [i] edit inline_comments.json" if inline else "")
             try:
-                answer = input(f"Post {what} to {target}? [y]es / [n]o / [e]dit comment.md: ").strip().lower()
+                answer = input(f"Post {what} to {target}? {choices}: ").strip().lower()
             except EOFError:
-                return False, body
+                return False, body, inline
             if answer in ("y", "yes"):
-                return True, body
+                return True, body, inline
             if answer in ("n", "no", ""):
-                return False, body
+                return False, body, inline
             if answer in ("e", "edit"):
-                editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
-                subprocess.call([*editor.split(), path])
-                with open(path, encoding="utf-8") as fh:
+                edit(comment_path)
+                with open(comment_path, encoding="utf-8") as fh:
                     body = fh.read()
                 continue
-            print("please answer y, n or e", file=sys.stderr)
+            if answer in ("i", "inline") and inline:
+                edit(inline_path)
+                try:
+                    with open(inline_path, encoding="utf-8") as fh:
+                        inline = json.load(fh)
+                except (OSError, json.JSONDecodeError) as exc:
+                    print(f"inline_comments.json could not be read ({exc}); keeping the previous list", file=sys.stderr)
+                continue
+            print("please answer y, n, e" + (" or i" if inline else ""), file=sys.stderr)
 
     return confirm
 

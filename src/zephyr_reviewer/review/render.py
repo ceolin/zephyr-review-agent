@@ -248,3 +248,17 @@ def render_test_plan(review: Review) -> list[str]:
         out += ["", "<details><summary>twister commands</summary>", "", "```sh", *cmds, "```", "</details>"]
     out.append("")
     return out
+
+
+def preview_inline(inline: list[dict[str, Any]]) -> str:
+    """Human-readable listing of inline comments, as they would appear on the pull request."""
+    if not inline:
+        return ""
+    out = [f"### {len(inline)} inline comment(s)"]
+    for i, c in enumerate(inline, 1):
+        where = f"{c['path']}:{c.get('start_line') or c['line']}" + (
+            f"-{c['line']}" if c.get("start_line") and c.get("start_line") != c["line"] else ""
+        )
+        body = "\n".join(ln for ln in c["body"].splitlines() if not ln.startswith("<!-- "))
+        out += ["", f"--- [{i}] {where} ---", body]
+    return "\n".join(out)

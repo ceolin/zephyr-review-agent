@@ -71,11 +71,12 @@ zephyr-reviewer review --repo ~/zephyrproject/zephyr --repository zephyrproject-
 ```
 
 Drop `--dry-run` to post. Anchored findings go inline by default; `--no-inline` puts everything in
-the top-level comment. `--ask` shows the finished review and prompts before anything is posted, with an
-option to edit `comment.md` first:
+the top-level comment. `--ask` shows the finished review, the summary comment and every inline comment with its file and
+line range, and prompts before anything is posted. `e` edits `comment.md`, `i` edits
+`inline_comments.json` (to drop or reword one), and the prompt returns with the edited versions:
 
 ```
-Post the summary comment and 2 inline comment(s) to PR #12345? [y]es / [n]o / [e]dit comment.md:
+Post the summary comment and 2 inline comment(s) to PR #12345? [y]es / [n]o / [e]dit comment.md / [i] edit inline_comments.json:
 ```
 
 ### Publish modes

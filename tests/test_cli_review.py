@@ -98,6 +98,9 @@ def test_review_command_dry_run_writes_artifacts_and_prints_comment(
     assert "## 🤖 AI review (advisory)" in printed and "🛑 **Request changes**" in printed
     # Inline delivery is the default: anchored findings are counted, unanchored ones listed.
     assert "2 finding(s) are posted as inline comments" in printed and "Unrelated file cited" in printed
+    # The dry run shows the inline comments too, with their locations.
+    assert "### 2 inline comment(s)" in printed and "--- [1] drivers/i2c/i2c_foo.c:17-19 ---" in printed
+    assert "**Early return leaks the bus lock**" in printed
     assert (out_dir / "comment.md").exists() and (out_dir / "transcript.jsonl").exists()
     inline = json.loads((out_dir / "inline_comments.json").read_text())
     assert [c["path"] for c in inline] == ["drivers/i2c/i2c_foo.c", "drivers/i2c/Kconfig"]

@@ -17,9 +17,9 @@ from .config import SEVERITY_RANK, ReviewConfig
 from .github_api import GitHub, GitHubError, PullRequest
 from .render import inline_comments, inline_marker, marker
 
-# Called in "ask" mode with the rendered comment and the number of inline comments; returns
-# (post it?, body to post). The CLI provides an interactive one; a non-interactive job gets none.
-ConfirmFn = Callable[[str, int], tuple[bool, str]]
+# Called in "ask" mode with the rendered comment and the inline comments; returns
+# (post it?, body to post, inline comments to post). The CLI provides an interactive one; a job gets none.
+ConfirmFn = Callable[[str, list[dict[str, Any]]], tuple[bool, str, list[dict[str, Any]]]]
 # Renders the top-level comment; the argument says whether anchored findings are left to inline comments.
 RenderFn = Callable[[bool], str]
 
@@ -122,7 +122,7 @@ def publish(
                 f"with: zephyr-reviewer post --output-dir {cfg.output_dir} --repository {cfg.repo_slug}"
             )
             return outputs
-        ok, body = confirm(body, len(inline))
+        ok, body, inline = confirm(body, inline)
         if not ok:
             log("not posted")
             return outputs
@@ -225,7 +225,7 @@ def post_saved(
     if inline and inline_path.exists():
         comments = json.loads(inline_path.read_text(encoding="utf-8"))
     if confirm is not None:
-        ok, body = confirm(body, len(comments))
+        ok, body, comments = confirm(body, comments)
         if not ok:
             log("not posted")
             return {"posted": "false"}
