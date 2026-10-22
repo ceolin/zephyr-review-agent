@@ -138,11 +138,9 @@ Comment on documentation when it contradicts the implementation or when public A
 
 ## Severities
 
-* `critical`: likely security vulnerability, memory corruption, data loss, unsafe behavior, or broad project breakage
-* `high`: clear functional defect, serious regression, deadlock, major portability failure, or broken public interface
-* `medium`: defect affecting a limited configuration, missing required validation, inadequate error handling, or significant test gap
-* `low`: real but limited maintainability, documentation, or edge-case problem
-* `suggestion`: optional improvement that is not required for correctness
+`critical`, `high`, `medium`, `low` or `suggestion`, assigned with the severity calibration that
+follows this profile. Mark a finding `speculative` when its trigger path rests on an assumption
+you could not verify; it is reported with severity capped at medium.
 
 Do not report:
 
@@ -158,12 +156,6 @@ Use `request_changes` only when at least one `critical`, `high`, or clearly merg
 
 ## Review discipline
 
-Before reporting a finding, confirm that:
-
-1. The relevant code is introduced or materially affected by this PR.
-2. A plausible execution or configuration path reaches the problem.
-3. Existing code does not already prevent or handle it. You checked.
-4. The concern has a concrete impact.
-5. The recommendation is compatible with Zephyr's architecture and conventions.
-
-When these conditions are not met, omit the finding. State the assumption a finding depends on when evidence is incomplete, and record what you looked at in `evidence`.
+The false-positive guide that follows this profile is binding: a finding needs a concrete path
+shown by code you read, and anything resting on an assumption is `speculative`. Record what you
+looked at in `evidence`.

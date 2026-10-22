@@ -281,6 +281,24 @@ The posted comment ends with the one-line advisory notice and nothing else. Mode
 calls, tokens, cost and time go to the job's step summary, the log and `review.json`. Set
 `show_run_details: "true"` (or `--show-details`) to append them to the comment.
 
+### False-positive guide and severity calibration
+
+Two prompts, [false_positive_guide.md](src/zephyr_reviewer/review/profiles/false_positive_guide.md)
+and [severity.md](src/zephyr_reviewer/review/profiles/severity.md), are applied wherever a finding
+is submitted or confirmed: appended to the single agent's prompt under "Before you submit", given
+to the verifier in two-stage mode, and to the verification and hard-case stages of the specialist
+pipeline (never to specialists, whose job is to raise candidates, and never to the report stage,
+whose findings are fixed). They are operational rather than advisory, following sashiko: no
+defensive checks without an untrusted source or a concrete bad caller; unchecked returns only
+when the call can fail and the API contract makes the check the caller's job; Kconfig-guarded code
+judged per configuration; binding-required devicetree properties are present; ISR-legal kernel
+calls named; pre-existing defects are not this PR's findings; commit-message claims are claims.
+
+Severity is reasoned from consequence, then trigger path, then reachability, and reachability
+never lowers a level. A finding whose trigger path rests on an unverified assumption is marked
+`speculative`, reported with severity capped at medium, and never dropped for being "probably
+unreachable". Edit the two files to tune the reviewer's judgement without touching code.
+
 ### Issues only
 
 The review reports problems and nothing else. The summary states the result and the key issue

@@ -150,9 +150,13 @@ async def run_two_stage(
     max_context_tokens: int = 160_000,
     dossier_chars: int = 40_000,
     extra_tools: list[LocalTool] | None = None,
+    verify_system: str | None = None,
     log=print,
 ) -> RunResult:
+    """``system`` drives the draft; ``verify_system`` (default: the same) drives the verifier, and is where
+    the false-positive guide and severity calibration belong."""
     started = time.monotonic()
+    verify_system = verify_system or system
     log(f"stage 1 (draft): {', '.join(draft_llm.models)}")
     draft = await run_review(
         draft_llm,
@@ -184,7 +188,7 @@ async def run_two_stage(
     final = await run_review(
         verify_llm,
         bridge,
-        system,
+        verify_system,
         verify_opening,
         changed_lines,
         max_steps=verify_steps,

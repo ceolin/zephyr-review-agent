@@ -247,7 +247,10 @@ async def _run(
     author_trust: str = "",
 ):
     profile = load_profile(cfg.profile)
-    system = system_prompt(profile, cfg.language)
+    mode = cfg.effective_pipeline()
+    # The single agent applies the guides itself; staged pipelines apply them where findings are confirmed.
+    system = system_prompt(profile, cfg.language, include_guides=(mode == "single"))
+    verify_system = system_prompt(profile, cfg.language, include_guides=True)
     overview = intel.overview()
     diff = intel.diff_text if len(intel.diff_text) <= cfg.inline_diff_chars else None
     digest = discussion.digest(cfg.max_discussion_chars) if discussion else None
@@ -280,7 +283,6 @@ async def _run(
         target = stdio_params(cfg.repo_root, cfg.head, cfg.base, cfg.max_tool_result_chars)
     async with ToolBridge(target, max_result_chars=cfg.max_tool_result_chars) as bridge:
         log(f"MCP server up with {len(bridge.tools)} tool(s); models: {', '.join(cfg.models)}")
-        mode = cfg.effective_pipeline()
         cheap_llm = (
             OpenRouter(
                 cfg.openrouter_api_key,
@@ -325,6 +327,7 @@ async def _run(
                 max_context_tokens=cfg.max_context_tokens,
                 dossier_chars=cfg.dossier_chars,
                 extra_tools=extra_tools,
+                verify_system=verify_system,
                 log=log,
             )
         else:

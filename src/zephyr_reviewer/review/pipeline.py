@@ -24,6 +24,7 @@ from typing import Any
 from .agent import AgentResult, LocalTool, RunResult, TerminalTool, run_agent
 from .mcp_client import ToolBridge
 from .openrouter import OpenRouter, Usage
+from .prompts import load_guides
 from .schema import (
     CATEGORIES,
     CONFIDENCES,
@@ -614,9 +615,10 @@ async def run_pipeline(
     final: list[dict[str, Any]] = []
     refuted = 0
 
-    # 2. Verification with full accounting.
+    # 2. Verification with full accounting; the guides apply here, not in the specialists.
+    guides = load_guides()
     if concerns or dismissals:
-        system = base_system + "\n\n" + _stage_prompt("verification")
+        system = base_system + "\n\n" + _stage_prompt("verification") + "\n\n" + guides
         terminal = TerminalTool(
             SUBMIT_VERIFICATION_TOOL,
             make_verification_parser(set(by_c), set(by_d)),
@@ -681,7 +683,7 @@ async def run_pipeline(
             batches = [[h] for h in cases[: max_hard_cases - 1]] + [cases[max_hard_cases - 1 :]]
         else:
             batches = [[h] for h in cases]
-        system = base_system + "\n\n" + _stage_prompt("hard_case")
+        system = base_system + "\n\n" + _stage_prompt("hard_case") + "\n\n" + guides
 
         async def decide(batch: list[HardCase]) -> tuple[list[HardCase], AgentResult]:
             if len(batch) == 1:

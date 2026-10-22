@@ -39,6 +39,9 @@ first, then submit. Concretely:
 - CI. `ci_status` lists the head commit's checks; `ci_failure_logs` reads a failed job's log. Do not
   repeat a failure CI already reports; diagnose it when you can tie it to the change, and never
   treat a passing CI as proof the change is correct.
+- Speculative findings. When one link in a finding's trigger path is an assumption you could not
+  verify, set `speculative: true` and state the assumption; severity is capped at medium. Report
+  it rather than drop it: "probably unreachable" is not a reason to bury a bug.
 - Issues only. `summary` states the result and the key problem, not what the change does.
   `test_assessment`, `commit_message_assessment` and `discussion_assessment` are empty unless
   something is missing or wrong. Never write "tests are adequate" or "no issues found" in them.
@@ -74,8 +77,25 @@ def load_profile(name_or_path: str) -> str:
         ) from None
 
 
-def system_prompt(profile_text: str, language: str) -> str:
-    return profile_text.rstrip() + "\n" + WORKING_RULES.format(submit=SUBMIT_TOOL_NAME, language=language)
+GUIDE_FILES = ("false_positive_guide.md", "severity.md")
+
+
+def load_guides() -> str:
+    """The false-positive guide and severity calibration, applied wherever findings are submitted or confirmed."""
+    parts = []
+    for name in GUIDE_FILES:
+        parts.append(
+            resources.files("zephyr_reviewer.review").joinpath(f"profiles/{name}").read_text(encoding="utf-8").rstrip()
+        )
+    return "\n\n---\n\n".join(parts)
+
+
+def system_prompt(profile_text: str, language: str, *, include_guides: bool = True) -> str:
+    """Profile, working rules and, unless a later stage applies them, the submission guides."""
+    text = profile_text.rstrip() + "\n" + WORKING_RULES.format(submit=SUBMIT_TOOL_NAME, language=language)
+    if include_guides:
+        text += "\n\n---\n\n# Before you submit\n\nApply both of the following to every finding.\n\n" + load_guides()
+    return text
 
 
 def opening_message(
