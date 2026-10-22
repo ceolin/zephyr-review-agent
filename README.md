@@ -240,6 +240,17 @@ the code rather than taken on trust. Only problems are reported, in an "Unresolv
 section of the comment: a request the head commit does not address, or a claim the code
 contradicts. Turn it off with `include_discussion: "false"`.
 
+### Prefetched context
+
+Models issue tool calls one at a time, and every call resends the whole transcript, so each lookup
+the model does not have to make is the cheapest saving available. The opening message therefore
+carries, read from git objects at the head commit and labelled with its SHA: the function each hunk
+lands in (whole, or an excerpt around the change for very long functions), small windows around
+changes outside any function, whole Kconfig, devicetree, binding and `.conf` files when they are
+short, and one line per changed function naming its callers by area with example sites. Blocks are
+ranked by changed lines and kept within `prefetch_chars` (default 24,000); whatever does not fit is
+named so the model can fetch it with `read_file`. Set `prefetch_chars: "0"` to disable.
+
 ### CI results
 
 The model sees the head commit's check runs and commit statuses in the opening message and can

@@ -99,6 +99,13 @@ inputs:
     description: "Size cap on each tool result handed to the model."
     required: false
     default: "24000"
+  prefetch_chars:
+    description: >-
+      Budget for prefetched context in the opening message: the functions each hunk lands in and
+      their callers, read at the head commit. Saves the model the round trips of fetching them. 0
+      disables.
+    required: false
+    default: "24000"
   inline_diff_chars:
     description: "Diffs up to this size are included in the opening message; larger ones are fetched per file."
     required: false
@@ -259,6 +266,7 @@ runs:
         INPUT_MAX_STEPS: ${{ inputs.max_steps }}
         INPUT_MAX_CONTEXT_TOKENS: ${{ inputs.max_context_tokens }}
         INPUT_MAX_TOOL_RESULT_CHARS: ${{ inputs.max_tool_result_chars }}
+        INPUT_PREFETCH_CHARS: ${{ inputs.prefetch_chars }}
         INPUT_INLINE_DIFF_CHARS: ${{ inputs.inline_diff_chars }}
         INPUT_GENERATE_TEST_PLAN: ${{ inputs.generate_test_plan }}
         INPUT_INCLUDE_CI: ${{ inputs.include_ci }}

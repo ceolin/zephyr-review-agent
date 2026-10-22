@@ -21,6 +21,9 @@ You are driving a set of tools over the repository at the pull request's head co
 first, then submit. Concretely:
 
 - Begin with `pr_overview` and `commit_messages`.
+- The opening message may carry prefetched context: the functions each hunk lands in and their
+  callers, read at the head commit. Use it before calling `read_file` for the same lines; fetch
+  what it lists as omitted and anything beyond it.
 - Read every changed file's relevant region with `read_file`; the diff alone is not enough. Lines
   the PR added are marked with `+` in `read_file` output.
 - Verify every assumption a finding rests on with a lookup, and record the lookups in `evidence`.
@@ -108,6 +111,7 @@ def opening_message(
     test_plan: bool = False,
     author_trust: str = "",
     ci_summary: str = "",
+    prefetched: str | None = None,
 ) -> str:
     from .discussion import sanitize
 
@@ -144,6 +148,8 @@ def opening_message(
         parts += ["", "### Full diff", "```diff", diff, "```"]
     else:
         parts += ["", "The diff is too large to include here; use `file_diff` per file."]
+    if prefetched:
+        parts += ["", "### Prefetched context", prefetched]
     if test_plan:
         parts += ["", "### Test plan requested", TEST_PLAN_REQUEST]
     parts += ["", f"Investigate with the tools, then call `{SUBMIT_TOOL_NAME}`."]

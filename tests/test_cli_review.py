@@ -147,6 +147,8 @@ def test_review_command_dry_run_writes_artifacts_and_prints_comment(
     )
     assert rc == 0
     assert len(_Stub.turns) == 2
+    opening = _Stub.turns[0]["messages"][1]["content"]
+    assert "### Prefetched context" in opening and "#### foo_transfer (drivers/i2c/i2c_foo.c:10-22" in opening
     printed = capsys.readouterr().out
     assert "## 🤖 AI review (advisory)" in printed and "🛑 **Request changes**" in printed
     # Inline delivery is the default: anchored findings are counted, unanchored ones listed.

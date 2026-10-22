@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 from functools import cached_property
 
-from . import devicetree, kconfig, symbols, tests_index
+from . import devicetree, kconfig, prefetch, symbols, tests_index
 from .diff import FileDiff, parse_unified_diff
 from .maintainers import Maintainers
 from .platforms import PlatformIndex
@@ -162,6 +162,10 @@ class SourceIntel:
             "name": name,
             "definitions": [{"kind": d.kind, "path": d.path, "line": d.line, "text": d.text[:200]} for d in defs],
         }
+
+    def prefetch(self, budget_chars: int = 24_000, *, with_callers: bool = True) -> str:
+        """Enclosing functions of every hunk and their callers, within a budget, for the opening message."""
+        return prefetch.prefetch(self.head, self.files, budget_chars, with_callers=with_callers)
 
     # ------------------------------------------------------------------- tools
     def overview(self) -> str:

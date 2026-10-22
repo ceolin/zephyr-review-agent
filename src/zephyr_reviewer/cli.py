@@ -57,6 +57,9 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--profile", help="Review profile name or path to a .md file (default: zephyr)")
     p.add_argument("--project-context", help="Extra guidance for the model")
     p.add_argument("--max-steps", type=int)
+    p.add_argument(
+        "--prefetch-chars", type=int, help="Budget for prefetched function context in the opening (0 disables)"
+    )
     p.add_argument("--max-context-tokens", type=int)
     p.add_argument("--test-plan", action="store_true", help="Also produce a test plan: suites, scenarios, platforms")
     p.add_argument(
@@ -129,6 +132,8 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         cfg.show_run_details = True
     if args.in_process:
         cfg.in_process_server = True
+    if args.prefetch_chars is not None:
+        cfg.prefetch_chars = args.prefetch_chars
     # Safety settings: the environment (workflow inputs) is the operator floor; flags may only tighten it.
     policy, rejected = floor.tighten(
         lockdown=args.lockdown,
@@ -254,6 +259,9 @@ async def _run(
     overview = intel.overview()
     diff = intel.diff_text if len(intel.diff_text) <= cfg.inline_diff_chars else None
     digest = discussion.digest(cfg.max_discussion_chars) if discussion else None
+    prefetched = intel.prefetch(cfg.prefetch_chars) if cfg.prefetch_chars > 0 else ""
+    if prefetched:
+        log(f"prefetched {len(prefetched):,} chars of function context")
     opening = opening_message(
         pr,
         overview,
@@ -264,6 +272,7 @@ async def _run(
         cfg.generate_test_plan,
         author_trust=author_trust,
         ci_summary=ci.summary_line() if ci else "",
+        prefetched=prefetched,
     )
     extra_tools = [LocalTool(PR_DISCUSSION_TOOL, discussion.tool_handler)] if discussion else []
     if ci:
