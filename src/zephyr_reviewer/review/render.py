@@ -66,8 +66,8 @@ def _finding_md(f: Finding, idx: int, repo: str, sha: str, api_url: str) -> str:
     lines = [
         f"#### {idx}. {f.title}",
         "",
-        f"{SEVERITY_BADGE.get(f.severity, f.severity)} · {f.category.replace('_', ' ')} · "
-        f"{_location(f, repo, sha, api_url)} · confidence {f.confidence}",
+        f"{SEVERITY_BADGE.get(f.severity, f.severity)}{' (speculative)' if f.speculative else ''} · "
+        f"{f.category.replace('_', ' ')} · {_location(f, repo, sha, api_url)} · confidence {f.confidence}",
         "",
     ]
     lines += [f"**Problem:** {f.problem}", ""]
@@ -204,7 +204,8 @@ def inline_comments(review: Review, tag: str = "zephyr-reviewer") -> list[dict[s
             inline_marker(tag, finding_key(f)),
             f"**{f.title}**",
             "",
-            f"{SEVERITY_BADGE.get(f.severity, f.severity)} · {f.category.replace('_', ' ')}",
+            f"{SEVERITY_BADGE.get(f.severity, f.severity)}{' (speculative)' if f.speculative else ''} · "
+            f"{f.category.replace('_', ' ')}",
             "",
             f.problem,
         ]

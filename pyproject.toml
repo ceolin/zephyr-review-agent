@@ -26,7 +26,7 @@ zephyr-reviewer = "zephyr_reviewer.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"zephyr_reviewer.review" = ["profiles/*.md"]
+"zephyr_reviewer.review" = ["profiles/*.md", "profiles/stages/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -38,12 +38,36 @@ inputs:
     description: "OpenRouter provider routing preferences as JSON, e.g. {\"data_collection\":\"deny\"}."
     required: false
     default: ""
+  pipeline:
+    description: >-
+      `single` (one agent), `two-stage` (a draft model investigates, `model` verifies), or
+      `multi-stage` (parallel specialist passes chosen from the change, a verification stage that
+      must account for every candidate, and per-finding re-verification of contested cases). `auto`
+      picks two-stage when `draft_model` is set, else single.
+    required: false
+    default: "auto"
   draft_model:
     description: >-
-      Advanced: enable the two-stage review. This low-cost model investigates and drafts the
-      review; `model` then verifies every finding against the code and finalizes. Empty disables.
+      Low-cost model. In two-stage it investigates and drafts; in multi-stage it runs the
+      specialist passes. `model` always verifies and finalizes. Empty: `model` does everything.
     required: false
     default: ""
+  specialists:
+    description: >-
+      multi-stage: comma-separated passes (intent, logic, concurrency, resources, hardware,
+      build_config, security) instead of planning them from the change.
+    required: false
+    default: ""
+  specialist_max_steps:
+    required: false
+    default: "15"
+  hard_case_max_steps:
+    required: false
+    default: "12"
+  max_hard_cases:
+    description: "multi-stage: hard cases verified individually; the rest are batched into one stage."
+    required: false
+    default: "8"
   draft_fallback_models:
     description: "Comma-separated fallbacks for the draft model."
     required: false
@@ -221,7 +245,12 @@ runs:
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_FALLBACK_MODELS: ${{ inputs.fallback_models }}
         INPUT_PROVIDER: ${{ inputs.provider }}
+        INPUT_PIPELINE: ${{ inputs.pipeline }}
         INPUT_DRAFT_MODEL: ${{ inputs.draft_model }}
+        INPUT_SPECIALISTS: ${{ inputs.specialists }}
+        INPUT_SPECIALIST_MAX_STEPS: ${{ inputs.specialist_max_steps }}
+        INPUT_HARD_CASE_MAX_STEPS: ${{ inputs.hard_case_max_steps }}
+        INPUT_MAX_HARD_CASES: ${{ inputs.max_hard_cases }}
         INPUT_DRAFT_FALLBACK_MODELS: ${{ inputs.draft_fallback_models }}
         INPUT_VERIFY_MAX_STEPS: ${{ inputs.verify_max_steps }}
         INPUT_DOSSIER_CHARS: ${{ inputs.dossier_chars }}

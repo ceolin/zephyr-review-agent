@@ -25,7 +25,60 @@ class _Stub(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         _Stub.turns.append(body)
         tool_msgs = [m for m in body["messages"] if m["role"] == "tool"]
-        if not tool_msgs:
+        names = {t["function"]["name"] for t in body.get("tools", [])}
+        if "submit_concerns" in names:  # multi-stage specialists: one quiet, one with a concern
+            stage = body["messages"][0]["content"].split("# Stage: ", 1)[1].split("\n", 1)[0]
+            concerns = []
+            if stage.startswith("execution flow"):
+                concerns = [dict(GOOD_REVIEW["findings"][0], evidence="read_file")]
+            calls = [
+                {
+                    "id": "s",
+                    "type": "function",
+                    "function": {
+                        "name": "submit_concerns",
+                        "arguments": json.dumps({"concerns": concerns, "dismissed": []}),
+                    },
+                }
+            ]
+        elif "submit_verification" in names:
+            calls = [
+                {
+                    "id": "v",
+                    "type": "function",
+                    "function": {
+                        "name": "submit_verification",
+                        "arguments": json.dumps(
+                            {
+                                "findings": [dict(GOOD_REVIEW["findings"][0], source_ids=["C1"])],
+                                "dismissed": [],
+                                "hard_cases": [],
+                            }
+                        ),
+                    },
+                }
+            ]
+        elif "submit_report" in names:
+            calls = [
+                {
+                    "id": "p",
+                    "type": "function",
+                    "function": {
+                        "name": "submit_report",
+                        "arguments": json.dumps(
+                            {
+                                "summary": "Lock leak on the error path.",
+                                "verdict": "request_changes",
+                                "confidence": "high",
+                                "test_assessment": "",
+                                "commit_message_assessment": "",
+                                "discussion_assessment": "",
+                            }
+                        ),
+                    },
+                }
+            ]
+        elif not tool_msgs:
             calls = [
                 {
                     "id": "a",
@@ -133,3 +186,51 @@ def test_review_command_no_inline_lists_everything(mini_repo, stub_openrouter, t
     printed = capsys.readouterr().out
     assert "Early return leaks the bus lock" in printed and "posted as inline comments" not in printed
     assert json.loads((tmp_path / "out" / "inline_comments.json").read_text()) == []
+
+
+def test_review_command_multi_stage_pipeline(mini_repo, stub_openrouter, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("ZR_BASE_URL", stub_openrouter)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+    out_dir = tmp_path / "out"
+    rc = cli.main(
+        [
+            "review",
+            "--repo",
+            str(mini_repo["root"]),
+            "--base",
+            mini_repo["base"],
+            "--head",
+            mini_repo["head"],
+            "--dry-run",
+            "--in-process",
+            "--pipeline",
+            "multi-stage",
+            "--specialists",
+            "intent,logic",
+            "--draft-model",
+            "cheap/model",
+            "--output-dir",
+            str(out_dir),
+        ]
+    )
+    assert rc == 0
+    terminals = [
+        sorted(t["function"]["name"] for t in r["tools"] if t["function"]["name"].startswith("submit"))
+        for r in _Stub.turns
+    ]
+    assert (
+        terminals.count(["submit_concerns"]) == 2
+        and ["submit_verification"] in terminals
+        and ["submit_report"] in terminals
+    )
+    specialist_models = {
+        r["model"]
+        for r in _Stub.turns
+        if ["submit_concerns"]
+        == sorted(t["function"]["name"] for t in r["tools"] if t["function"]["name"].startswith("submit"))
+    }
+    assert specialist_models == {"cheap/model"}
+    rm = json.loads((out_dir / "review_map.json").read_text())
+    assert rm["specialists"] == ["intent", "logic"] and rm["concerns"][0]["fate"] == "confirmed"
+    printed = capsys.readouterr().out
+    assert "Lock leak on the error path." in printed and "1 finding(s) are posted as inline comments" in printed

@@ -68,6 +68,8 @@ def save_artifacts(
         "review": run.review.to_dict() if run.review else None,
     }
     (d / "review.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    if run.review_map is not None:
+        (d / "review_map.json").write_text(json.dumps(run.review_map, indent=2), encoding="utf-8")
     if run.review is not None and run.review.test_plan:
         from .testplan import to_yaml
 

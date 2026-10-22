@@ -316,6 +316,7 @@ def build_report(
             "repo_head": _git(root, "rev-parse", "--short=12", "HEAD"),
             "models": cfg.models,
             "draft_models": cfg.draft_models,
+            "pipeline": cfg.effective_pipeline(),
             "judge_model": judge_llm.models[0] if judge_llm else None,
             "profile": cfg.profile,
             "max_steps": cfg.max_steps,

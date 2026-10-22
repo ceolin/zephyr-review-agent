@@ -23,6 +23,7 @@ from .review.discussion import PR_DISCUSSION_TOOL, Discussion, trust_level
 from .review.github_api import GitHub, PullRequest, pr_number_from_event
 from .review.mcp_client import ToolBridge, stdio_params
 from .review.openrouter import OpenRouter
+from .review.pipeline import hunk_text, run_pipeline
 from .review.prompts import load_profile, opening_message, system_prompt
 from .review.render import inline_comments, preview_inline, render_comment, render_failure, run_details
 from .review.stages import run_two_stage
@@ -42,7 +43,13 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--model", help="Primary OpenRouter model slug")
     p.add_argument("--fallback-models", help="Comma-separated fallback slugs")
     p.add_argument("--provider", help="OpenRouter provider routing preferences, JSON")
-    p.add_argument("--draft-model", help="Enable the two-stage review: this low-cost model investigates and drafts")
+    p.add_argument(
+        "--pipeline",
+        choices=["auto", "single", "two-stage", "multi-stage"],
+        help="auto: two-stage when a draft model is set, else single",
+    )
+    p.add_argument("--specialists", help="multi-stage: comma-separated specialist passes instead of planning them")
+    p.add_argument("--draft-model", help="Low-cost model: drafts in two-stage, runs the specialists in multi-stage")
     p.add_argument("--draft-fallback-models", help="Comma-separated fallbacks for the draft model")
     p.add_argument("--verify-max-steps", type=int, help="Step budget of the verifying model in two-stage mode")
     p.add_argument("--api-key", help="OpenRouter API key (default: $OPENROUTER_API_KEY)")
@@ -102,6 +109,10 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         cfg.models = [cfg.models[0]] + [m.strip() for m in args.fallback_models.split(",") if m.strip()]
     if args.provider:
         cfg.provider = json.loads(args.provider)
+    if args.pipeline:
+        cfg.pipeline = args.pipeline
+    if args.specialists:
+        cfg.specialists = [x.strip() for x in args.specialists.split(",") if x.strip()]
     if args.draft_model:
         cfg.draft_models = [args.draft_model]
     if args.draft_fallback_models:
@@ -269,8 +280,9 @@ async def _run(
         target = stdio_params(cfg.repo_root, cfg.head, cfg.base, cfg.max_tool_result_chars)
     async with ToolBridge(target, max_result_chars=cfg.max_tool_result_chars) as bridge:
         log(f"MCP server up with {len(bridge.tools)} tool(s); models: {', '.join(cfg.models)}")
-        if cfg.draft_models:
-            draft_llm = OpenRouter(
+        mode = cfg.effective_pipeline()
+        cheap_llm = (
+            OpenRouter(
                 cfg.openrouter_api_key,
                 cfg.draft_models,
                 base_url=cfg.base_url,
@@ -278,8 +290,31 @@ async def _run(
                 max_tokens=cfg.max_tokens,
                 provider=cfg.provider,
             )
+            if cfg.draft_models
+            else llm
+        )
+        if mode == "multi-stage":
+            run = await run_pipeline(
+                cheap_llm,
+                llm,
+                bridge,
+                system,
+                opening,
+                changed,
+                changed_files=[f.path for f in intel.files],
+                added_text=hunk_text(intel.diff_text),
+                specialists=cfg.specialists or None,
+                specialist_max_steps=cfg.specialist_max_steps,
+                verify_max_steps=cfg.verify_max_steps,
+                hard_case_max_steps=cfg.hard_case_max_steps,
+                max_hard_cases=cfg.max_hard_cases,
+                max_context_tokens=cfg.max_context_tokens,
+                extra_tools=extra_tools,
+                log=log,
+            )
+        elif mode == "two-stage":
             run = await run_two_stage(
-                draft_llm,
+                cheap_llm,
                 llm,
                 bridge,
                 system,
@@ -474,6 +509,8 @@ def cmd_benchmark_run(args: argparse.Namespace) -> int:
         cfg.models = [args.model] + [m for m in cfg.models[1:] if m != args.model]
     if args.draft_model:
         cfg.draft_models = [args.draft_model]
+    if args.pipeline:
+        cfg.pipeline = args.pipeline
     if args.max_steps is not None:
         cfg.max_steps = args.max_steps
     if args.profile:
@@ -619,6 +656,7 @@ def main(argv: list[str] | None = None) -> int:
     br.add_argument("--concurrency", type=int, default=2)
     br.add_argument("--model")
     br.add_argument("--draft-model")
+    br.add_argument("--pipeline", choices=["auto", "single", "two-stage", "multi-stage"])
     br.add_argument("--judge-model", help="Model that grades detections (default: the review model)")
     br.add_argument("--no-judge", action="store_true")
     br.add_argument("--max-steps", type=int)

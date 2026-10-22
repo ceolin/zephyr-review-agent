@@ -149,21 +149,20 @@ platform coverage that matches what changed.
 """
 
 
-NUDGE = (
-    f"You replied with prose instead of a tool call. Continue investigating with the tools, or call "
-    f"`{SUBMIT_TOOL_NAME}` to finish."
-)
-
-BUDGET_EXHAUSTED = (
-    f"The step budget is exhausted. Call `{SUBMIT_TOOL_NAME}` now with the findings you have verified so far. "
-    "Lower `confidence` on anything you could not check, and drop findings you could not support."
-)
+def nudge(tool: str = SUBMIT_TOOL_NAME) -> str:
+    return f"You replied with prose instead of a tool call. Continue with the tools, or call `{tool}` to finish."
 
 
-def rejection_message(errors: list[str]) -> str:
+def budget_exhausted(tool: str = SUBMIT_TOOL_NAME) -> str:
     return (
-        "The review was rejected for these reasons; fix them and call "
-        + SUBMIT_TOOL_NAME
-        + " again:\n- "
-        + "\n- ".join(errors)
+        f"The step budget is exhausted. Call `{tool}` now with what you have verified so far. "
+        "Lower `confidence` on anything you could not check, and drop what you could not support."
     )
+
+
+NUDGE = nudge()
+BUDGET_EXHAUSTED = budget_exhausted()
+
+
+def rejection_message(errors: list[str], tool: str = SUBMIT_TOOL_NAME) -> str:
+    return f"The submission was rejected for these reasons; fix them and call {tool} again:\n- " + "\n- ".join(errors)

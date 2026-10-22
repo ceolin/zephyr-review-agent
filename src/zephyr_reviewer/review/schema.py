@@ -109,6 +109,11 @@ SUBMIT_REVIEW_TOOL: dict[str, Any] = {
                                 "description": "Which lookups support this finding, "
                                 "e.g. 'read_file drivers/i2c/i2c_foo.c:120-160; find_references foo_init'.",
                             },
+                            "speculative": {
+                                "type": "boolean",
+                                "description": "True when the trigger path rests on an assumption you could not "
+                                "verify. Reported anyway, with severity capped at medium.",
+                            },
                         },
                     },
                 },
@@ -179,6 +184,7 @@ class Finding:
     confidence: str = "medium"
     evidence: str = ""
     end_line: int = 0
+    speculative: bool = False
     inline: bool = False  # anchored to a line GitHub will accept an inline comment on
     notes: list[str] = field(default_factory=list)
 
@@ -334,7 +340,11 @@ def parse_review(args: dict[str, Any], changed_lines: dict[str, set[int]]) -> tu
             suggested_code=str(rf.get("suggested_code") or "").rstrip(),
             confidence=_norm_enum(rf.get("confidence"), CONFIDENCES, "medium"),
             evidence=str(rf.get("evidence") or "").strip(),
+            speculative=bool(rf.get("speculative", False)),
         )
+        if f.speculative and f.severity in ("critical", "high"):
+            f.notes.append(f"speculative: severity capped at medium (was {f.severity})")
+            f.severity = "medium"
         if path and path not in changed_lines:
             f.notes.append("file is not changed by this pull request; shown in the summary only")
             f.line, f.end_line = 0, 0

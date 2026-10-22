@@ -46,9 +46,14 @@ class ReviewConfig:
     base_url: str = "https://openrouter.ai/api/v1"
     models: list[str] = field(default_factory=lambda: ["anthropic/claude-sonnet-4.5"])
     provider: dict | None = None
-    draft_models: list[str] = field(default_factory=list)  # non-empty enables the two-stage review
+    pipeline: str = "auto"  # auto | single | two-stage | multi-stage
+    draft_models: list[str] = field(default_factory=list)  # two-stage drafts and multi-stage specialists run here
     verify_max_steps: int = 15
     dossier_chars: int = 40_000
+    specialist_max_steps: int = 15
+    hard_case_max_steps: int = 12
+    max_hard_cases: int = 8
+    specialists: list[str] = field(default_factory=list)  # empty: planned from the change
     temperature: float = 0.1
     max_tokens: int = 8000
     max_steps: int = 40
@@ -102,6 +107,11 @@ class ReviewConfig:
         cfg.provider = json.loads(prov) if prov.strip() else None
         drafts = [_env("draft_model")] + _list(_env("draft_fallback_models"))
         cfg.draft_models = [m for i, m in enumerate(drafts) if m and m not in drafts[:i]]
+        cfg.pipeline = _env("pipeline", "auto").strip().lower() or "auto"
+        cfg.specialist_max_steps = int(_env("specialist_max_steps", str(cfg.specialist_max_steps)))
+        cfg.hard_case_max_steps = int(_env("hard_case_max_steps", str(cfg.hard_case_max_steps)))
+        cfg.max_hard_cases = int(_env("max_hard_cases", str(cfg.max_hard_cases)))
+        cfg.specialists = _list(_env("specialists"))
         cfg.verify_max_steps = int(_env("verify_max_steps", str(cfg.verify_max_steps)))
         cfg.dossier_chars = int(_env("dossier_chars", str(cfg.dossier_chars)))
         cfg.temperature = float(_env("temperature", str(cfg.temperature)))
@@ -138,6 +148,8 @@ class ReviewConfig:
         errors = []
         if not self.openrouter_api_key:
             errors.append("OpenRouter API key missing (--api-key, OPENROUTER_API_KEY or INPUT_OPENROUTER_API_KEY)")
+        if self.pipeline not in ("auto", "single", "two-stage", "multi-stage"):
+            errors.append("pipeline must be auto, single, two-stage or multi-stage")
         if self.publish not in PUBLISH_MODES:
             errors.append(f"publish must be one of {', '.join(PUBLISH_MODES)}")
         if self.lockdown not in LOCKDOWN_LEVELS:
@@ -174,3 +186,8 @@ class ReviewConfig:
         self.post_comment = policy.post_comment
         self.post_inline = policy.post_inline
         self.publish = policy.publish
+
+    def effective_pipeline(self) -> str:
+        if self.pipeline != "auto":
+            return self.pipeline
+        return "two-stage" if self.draft_models else "single"

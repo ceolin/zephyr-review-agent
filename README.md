@@ -175,6 +175,33 @@ scenarios (with the closest match suggested), unknown platform identifiers, and 
 table and ready-to-run `west twister` commands; `review-output/test_plan.yaml` holds the same plan
 for automation.
 
+### Specialist pipeline (advanced)
+
+`pipeline: multi-stage` replaces the single agent with a pipeline modelled on
+[sashiko](https://github.com/sashiko-dev/sashiko):
+
+1. **Plan**, deterministically: `intent` and `logic` always run; `concurrency`, `resources`,
+   `hardware`, `build_config` and `security` are added from the files and code the change touches
+   (or set `specialists` explicitly).
+2. **Specialists**, in parallel, each with the tools, a focused prompt and its own step budget. Each
+   returns `concerns` and `dismissed` concerns with evidence; dismissals matter because they stop
+   another pass's identical guess from surviving, and weak ones are audited.
+3. **Verification** on the primary model, with a Zephyr false-positive guide and severity
+   calibration. Every concern `C*` and dismissal `D*` must land in exactly one of `findings`,
+   `dismissed` or `hard_cases`, or the submission is rejected with the missing ids. Concerns can be
+   confirmed or sent to hard cases, never dropped here; a dismissal can be accepted only when it
+   cites disproving code.
+4. **Hard cases**, in parallel, one per contested or speculative candidate up to `max_hard_cases`
+   (the rest batched), each with tools and its own budget, confirming with a complete finding or
+   refuting with evidence. An undecided case is kept as speculative rather than lost.
+5. **Report**, without tools: summary, verdict and the issue-only assessments; the findings are
+   fixed, and the verdict is forced to `request_changes` when a high or critical finding stands.
+
+Findings whose trigger path rests on an unverified assumption carry `speculative: true` and are
+capped at medium severity, reported rather than buried. `review-output/review_map.json` records the
+lineage: every candidate, which stage produced it, and where it ended and why. When `draft_model`
+is set the specialists run on it and the primary model verifies.
+
 ### Two-stage review (advanced)
 
 Investigation turns dominate cost: the whole transcript is resent on every call. Setting
@@ -355,6 +382,8 @@ trailer` when precision matters more than size.
 | `src/zephyr_reviewer/review/policy.py` | Safety settings a request may tighten but never relax |
 | `src/zephyr_reviewer/review/testplan.py` | Validates a proposed test plan against suites, scenarios and platforms |
 | `src/zephyr_reviewer/review/stages.py` | Two-stage review: draft with a cheap model, verify with a strong one |
+| `src/zephyr_reviewer/review/pipeline.py` | Specialist pipeline: planner, accounting rules, hard cases, review map |
+| `src/zephyr_reviewer/review/profiles/stages/` | Stage prompts, including the verification false-positive guide |
 | `src/zephyr_reviewer/review/discussion.py` | PR comments and threads with author trust and resolution state; digest and `pr_discussion` tool |
 | `src/zephyr_reviewer/review/render.py`, `publish.py`, `github_api.py` | Comment rendering and delivery |
 | `src/zephyr_reviewer/benchmark/` | Dataset mining from fix history, LLM judge, runner and report |
