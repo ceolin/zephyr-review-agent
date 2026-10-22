@@ -440,6 +440,103 @@ def cmd_post(args: argparse.Namespace) -> int:
     return 0 if out.get("posted") == "true" else 1
 
 
+# ------------------------------------------------------------------------- benchmark
+def cmd_benchmark_mine(args: argparse.Namespace) -> int:
+    from .benchmark import mine as bm
+
+    entries = bm.mine(
+        args.repo,
+        args.range,
+        since=args.since,
+        max_entries=args.max,
+        use_blame=not args.trailers_only,
+        min_confidence=args.min_confidence,
+        log=log,
+    )
+    bm.save(entries, args.out)
+    by_source = {}
+    for e in entries:
+        by_source[e.source] = by_source.get(e.source, 0) + 1
+    log(f"{len(entries)} entries written to {args.out} ({', '.join(f'{k} {v}' for k, v in sorted(by_source.items()))})")
+    return 0
+
+
+def cmd_benchmark_run(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .benchmark import mine as bm
+    from .benchmark.run import run_benchmark
+    from .review.render import run_details  # noqa: F401 - keeps import graph explicit
+
+    cfg = ReviewConfig.from_env()
+    cfg.repo_root = args.repo
+    if args.model:
+        cfg.models = [args.model] + [m for m in cfg.models[1:] if m != args.model]
+    if args.draft_model:
+        cfg.draft_models = [args.draft_model]
+    if args.max_steps is not None:
+        cfg.max_steps = args.max_steps
+    if args.profile:
+        cfg.profile = args.profile
+    if args.api_key:
+        cfg.openrouter_api_key = args.api_key
+    cfg.publish = "never"
+    if not args.analyze_only and not cfg.openrouter_api_key:
+        log("::error::OpenRouter API key missing (--api-key or OPENROUTER_API_KEY)")
+        return 2
+    entries = bm.load(args.file)
+    if args.subsystem:
+        entries = [e for e in entries if args.subsystem.lower() in e.subsystem.lower()]
+    if args.source:
+        entries = [e for e in entries if e.source == args.source]
+    if args.min_confidence:
+        entries = [e for e in entries if e.confidence >= args.min_confidence]
+    entries = entries[args.offset : args.offset + args.limit if args.limit else None]
+    if not entries:
+        log("::error::no entries selected")
+        return 2
+    if args.analyze_only:
+        out_dir = Path(args.analyze_only)
+    else:
+        from datetime import datetime
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out_dir = Path(args.output_dir) / f"{stamp}_{Path(args.file).stem}"
+    judge_llm = None
+    if not args.no_judge:
+        judge_models = [args.judge_model] if args.judge_model else cfg.models
+        if not cfg.openrouter_api_key:
+            log("::error::judging needs an OpenRouter API key; pass --no-judge to skip")
+            return 2
+        judge_llm = OpenRouter(
+            cfg.openrouter_api_key,
+            judge_models,
+            base_url=cfg.base_url,
+            temperature=0.0,
+            max_tokens=1000,
+            provider=cfg.provider,
+        )
+    log(f"benchmark: {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} -> {out_dir}")
+    report = asyncio.run(
+        run_benchmark(
+            cfg,
+            args.repo,
+            entries,
+            out_dir,
+            judge_llm=judge_llm,
+            concurrency=args.concurrency,
+            analyze_only=bool(args.analyze_only),
+            log=log,
+        )
+    )
+    print((out_dir / "summary.md").read_text(encoding="utf-8"))
+    det = report["summary"]["detection"]
+    log(
+        f"detected {det['DETECTED']}, partial {det['PARTIALLY_DETECTED']}, missed {det['MISSED']}; results in {out_dir}"
+    )
+    return 0
+
+
 # ----------------------------------------------------------------------------- tools
 def cmd_tools(args: argparse.Namespace) -> int:
     intel = SourceIntel(args.repo, args.head, args.base)
@@ -497,6 +594,37 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--comment-tag", default="zephyr-reviewer")
     o.add_argument("--yes", action="store_true", help="Post without asking")
     o.set_defaults(fn=cmd_post)
+
+    b = sub.add_parser("benchmark", help="Measure the reviewer against bugs the project fixed later")
+    bsub = b.add_subparsers(dest="bcmd", required=True)
+    bm = bsub.add_parser("mine", help="Build a dataset from fix commits (Fixes: trailers, or blame of removed lines)")
+    bm.add_argument("--repo", default=".")
+    bm.add_argument("--range", default="HEAD", help="Revision range to scan for fix commits (default: HEAD)")
+    bm.add_argument("--since", help="Only fix commits after this date, e.g. 2025-01-01")
+    bm.add_argument("--max", type=int, default=200, help="Maximum entries")
+    bm.add_argument("--trailers-only", action="store_true", help="Only use Fixes: <sha> trailers, no blame inference")
+    bm.add_argument("--min-confidence", type=float, default=0.6, help="Minimum blame share for inferred culprits")
+    bm.add_argument("--out", default="benchmark.json")
+    bm.set_defaults(fn=cmd_benchmark_mine)
+    br = bsub.add_parser("run", help="Review each entry's commit as if new, judge the findings, and report")
+    br.add_argument("file", help="Dataset produced by `benchmark mine`")
+    br.add_argument("--repo", default=".")
+    br.add_argument("--output-dir", default="benchmarks/runs")
+    br.add_argument("--analyze-only", metavar="RUN_DIR", help="Re-judge a previous run directory instead of reviewing")
+    br.add_argument("--limit", type=int, default=0)
+    br.add_argument("--offset", type=int, default=0)
+    br.add_argument("--subsystem", help="Only entries whose subsystem contains this text")
+    br.add_argument("--source", choices=["trailer", "blame", "manual"])
+    br.add_argument("--min-confidence", type=float, default=0.0)
+    br.add_argument("--concurrency", type=int, default=2)
+    br.add_argument("--model")
+    br.add_argument("--draft-model")
+    br.add_argument("--judge-model", help="Model that grades detections (default: the review model)")
+    br.add_argument("--no-judge", action="store_true")
+    br.add_argument("--max-steps", type=int)
+    br.add_argument("--profile")
+    br.add_argument("--api-key")
+    br.set_defaults(fn=cmd_benchmark_run)
 
     t = sub.add_parser("tools", help="List the MCP tools as the model sees them")
     t.add_argument("--repo", default=".")

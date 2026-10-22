@@ -296,6 +296,47 @@ and `dry_run` plus the uploaded artifacts let a maintainer read the review befor
 the pull request. Decide with the project how it should be used before enabling posting on the
 upstream repository.
 
+## Benchmarking against history
+
+Every change to the profile, the pipeline or the model choice should have a number. The benchmark
+reviews commits that later turned out to be buggy, as if they were new, and grades the findings
+against the fix that followed. The idea and the dataset shape follow
+[sashiko](https://github.com/sashiko-dev/sashiko).
+
+```bash
+# Build a dataset from fix commits. Fixes: <sha> trailers are exact; for fixes that only reference
+# an issue, the lines the fix removes are blamed at its parent and the commit that introduced most
+# of them is the culprit, with that share recorded as confidence.
+zephyr-reviewer benchmark mine --repo ~/zephyrproject/zephyr --range upstream/main --since 2025-06-01 \
+    --max 150 --out benchmarks/zephyr-fixes.json
+
+# Review every culprit against its parent, judge each result, and report.
+export OPENROUTER_API_KEY=sk-or-...
+zephyr-reviewer benchmark run benchmarks/zephyr-fixes.json --repo ~/zephyrproject/zephyr \
+    --limit 20 --concurrency 3 --judge-model anthropic/claude-sonnet-4.5
+
+# Re-grade an existing run (new judge model or prompt) without reviewing again.
+zephyr-reviewer benchmark run benchmarks/zephyr-fixes.json --repo ~/zephyrproject/zephyr \
+    --analyze-only benchmarks/runs/<run>
+```
+
+Each entry has `commit`, `fixed_by`, `source` (`trailer`, `blame` or `manual`), `confidence`,
+`subsystem` (from MAINTAINERS.yml), `files` and `problem_description` (the fix's message without
+trailers). Hand-written entries need only `commit` and `problem_description`.
+
+A run directory holds one folder per entry with the usual review artifacts plus `entry.json` and
+`judgement.json`, and `results.json` and `summary.md` for the whole run: detection (strict and
+lenient, by subsystem and by source), noise (findings per review, unmatched findings by
+severity, verdict distribution) and resources (steps, tool calls, tokens, cost and time as
+mean, p50, p90 and max). The judge is a model with a forced tool call classifying each entry as
+`DETECTED`, `PARTIALLY_DETECTED` or `MISSED`, told not to reward volume. `--draft-model`,
+`--max-steps` and `--profile` let you compare pipeline variants on the same dataset; filter with
+`--subsystem`, `--source` and `--min-confidence`.
+
+`benchmarks/zephyr-fixes.json` is a dataset mined from upstream since mid-2025. Expect the blame
+source to carry some wrong culprits; treat `confidence` below 0.8 with care and prefer `--source
+trailer` when precision matters more than size.
+
 ## Layout
 
 | Path | Purpose |
@@ -316,13 +357,14 @@ upstream repository.
 | `src/zephyr_reviewer/review/stages.py` | Two-stage review: draft with a cheap model, verify with a strong one |
 | `src/zephyr_reviewer/review/discussion.py` | PR comments and threads with author trust and resolution state; digest and `pr_discussion` tool |
 | `src/zephyr_reviewer/review/render.py`, `publish.py`, `github_api.py` | Comment rendering and delivery |
-| `src/zephyr_reviewer/cli.py` | `serve`, `review`, `tools`, `call` |
+| `src/zephyr_reviewer/benchmark/` | Dataset mining from fix history, LLM judge, runner and report |
+| `src/zephyr_reviewer/cli.py` | `serve`, `review`, `post`, `benchmark`, `tools`, `call` |
 | `tests/` | A miniature Zephyr-shaped repository fixture; intel, MCP (in-process and stdio), agent, publish tests |
 
 ## What is not done
 
 - No live run yet. The agent is exercised against a scripted OpenRouter; the first real pull
-  request will calibrate `max_steps`, cost, and the profile.
+  request and the first benchmark run will calibrate `max_steps`, cost, and the profile.
 - Symbol lookup is regex over `git grep`. It is fast and good enough to start, and wrong on
   unusual formatting. A real index belongs in the shared service.
 - The shared service (indexing, review history, project knowledge) does not exist. `review.json`
