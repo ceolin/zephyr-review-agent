@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .mcp_client import ToolBridge
-from .openrouter import OpenRouter, Usage, assistant_message_for_history
+from .openrouter import ContextLengthError, OpenRouter, OpenRouterError, Usage, assistant_message_for_history
 from .prompts import budget_exhausted, nudge, rejection_message
 from .schema import SUBMIT_REVIEW_TOOL, SUBMIT_TOOL_NAME, Review, parse_review
 
@@ -133,6 +133,7 @@ async def run_agent(
     last_prompt_tokens = 0
     errors: list[str] = []
     tool_results: list[dict[str, Any]] = []
+    compactions = 0
 
     def done(output: Any, step: int) -> AgentResult:
         return AgentResult(
@@ -148,7 +149,29 @@ async def run_agent(
         if forced:
             tool_choice = {"type": "function", "function": {"name": terminal.name}}
 
-        result = await asyncio.to_thread(llm.chat, messages, tools, tool_choice)
+        try:
+            result = await asyncio.to_thread(llm.chat, messages, tools, tool_choice)
+        except ContextLengthError as exc:
+            compactions += 1
+            # First elide older tool results and retry; then everything and force submission; then give up.
+            elided = compact_history(messages, keep_recent=4) if compactions == 1 else 0
+            if elided:
+                transcript.append({"kind": "compaction", "step": step, "elided": elided, "error": str(exc)[:300]})
+                log(f"{tag}[step {step}] context window exceeded; elided {elided} older tool result(s) and retrying")
+                continue
+            elided = compact_history(messages, keep_recent=0)
+            if elided:
+                transcript.append({"kind": "compaction", "step": step, "elided": elided, "error": str(exc)[:300]})
+                forced = True
+                log(f"{tag}[step {step}] context still too large; elided all tool results, forcing submission")
+                continue
+            errors.append(f"context window exceeded and nothing left to compact: {str(exc)[:300]}")
+            log(f"{tag}[step {step}] {errors[-1]}")
+            return done(None, step)
+        except OpenRouterError as exc:
+            errors.append(f"model request failed: {str(exc)[:500]}")
+            log(f"{tag}[step {step}] {errors[-1]}")
+            return done(None, step)
         usage.add(result.usage)
         last_prompt_tokens = int((result.usage or {}).get("prompt_tokens") or 0)
         if result.model and result.model not in models:
@@ -244,6 +267,18 @@ async def run_agent(
 
     errors.append(f"model did not call {terminal.name} within {max_steps} steps")
     return done(None, max_steps)
+
+
+ELIDED = "[tool result elided to fit the context window; call the tool again if you still need it]"
+
+
+def compact_history(messages: list[dict[str, Any]], keep_recent: int = 4) -> int:
+    """Replace the content of older tool results with a short note; returns how many were elided."""
+    tool_idx = [i for i, m in enumerate(messages) if m.get("role") == "tool" and m.get("content") != ELIDED]
+    victims = tool_idx[: max(0, len(tool_idx) - keep_recent)] if keep_recent else tool_idx
+    for i in victims:
+        messages[i]["content"] = ELIDED
+    return len(victims)
 
 
 def review_terminal(changed_lines: dict[str, set[int]]) -> TerminalTool:

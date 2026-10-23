@@ -242,13 +242,33 @@ def add_server_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--port", type=int, default=8765)
 
 
+def _only_broken_pipes(exc: BaseException) -> bool:
+    """True when an exception (group) consists solely of BrokenPipeError: the client went away."""
+    if isinstance(exc, BrokenPipeError):
+        return True
+    if isinstance(exc, BaseExceptionGroup):
+        return bool(exc.exceptions) and all(_only_broken_pipes(e) for e in exc.exceptions)
+    return False
+
+
 def serve(args: argparse.Namespace) -> int:
     intel = SourceIntel(args.repo, args.head, args.base, max_chars=args.max_chars)
     srv = build_server(intel)
-    if args.transport == "stdio":
-        srv.run(transport="stdio")
-    else:
-        srv.run(transport="streamable-http", host=args.host, port=args.port)
+    try:
+        if args.transport == "stdio":
+            srv.run(transport="stdio")
+        else:
+            srv.run(transport="streamable-http", host=args.host, port=args.port)
+    except BaseException as exc:  # noqa: BLE001 - classify, then re-raise anything real
+        if _only_broken_pipes(exc):
+            # The orchestrator closed the pipe (it finished or failed). Nothing to report here, and
+            # printing a traceback would only hide the orchestrator's own message.
+            try:
+                sys.stdout.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return 0
+        raise
     return 0
 
 

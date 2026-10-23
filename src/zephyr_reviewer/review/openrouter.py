@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,6 +25,21 @@ RETRY_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 class OpenRouterError(RuntimeError):
     pass
+
+
+class ContextLengthError(OpenRouterError):
+    """The request exceeded the model's context window: a budget signal, not a transport failure."""
+
+
+_CONTEXT_LENGTH = re.compile(
+    r"context[ _]length|maximum context|context window|too many tokens|prompt is too long|input is too long"
+    r"|exceeds? the (?:maximum|limit)|reduce the length|token limit",
+    re.I,
+)
+
+
+def _is_context_length(status: int, text: str) -> bool:
+    return status in (400, 413, 422) and bool(_CONTEXT_LENGTH.search(text or ""))
 
 
 @dataclass
@@ -130,6 +146,8 @@ class OpenRouter:
                 self._sleep(attempt, resp.headers.get("Retry-After"))
                 continue
             if resp.status_code >= 400:
+                if _is_context_length(resp.status_code, resp.text):
+                    raise ContextLengthError(f"HTTP {resp.status_code}: {resp.text[:600]}")
                 raise OpenRouterError(f"HTTP {resp.status_code}: {resp.text[:1000]}")
             data = resp.json()
             if "error" in data and not data.get("choices"):
@@ -140,6 +158,8 @@ class OpenRouter:
                     last_error = msg
                     self._sleep(attempt, None)
                     continue
+                if _is_context_length(int(code or 400), msg):
+                    raise ContextLengthError(f"OpenRouter error: {msg}")
                 raise OpenRouterError(f"OpenRouter error: {msg}")
             choices = data.get("choices") or []
             if not choices:

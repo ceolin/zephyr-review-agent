@@ -374,7 +374,14 @@ def cmd_review(args: argparse.Namespace) -> int:
         return 0
     log(f"reviewing {len(intel.files)} file(s), {len(intel.commits)} commit(s): {cfg.base[:12]}..{cfg.head[:12]}")
     author_trust = trust_level(gh, pr.author, False) if gh is not None and cfg.lockdown != "off" and pr.author else ""
-    run = asyncio.run(_run(cfg, pr, intel, _load_discussion(cfg, gh, pr), _load_ci(cfg, gh, pr), author_trust))
+    try:
+        run = asyncio.run(_run(cfg, pr, intel, _load_discussion(cfg, gh, pr), _load_ci(cfg, gh, pr), author_trust))
+    except Exception as exc:  # noqa: BLE001 - report, save what we can, exit non-zero
+        from .review.agent import RunResult
+        from .review.openrouter import Usage
+
+        run = RunResult(None, 0, Usage(), [], False, errors=[f"{type(exc).__name__}: {str(exc)[:800]}"])
+        log(f"::error::review failed: {run.errors[0]}")
     if run.review is not None and run.review.test_plan:
         testplan.annotate(run.review, intel)
         flagged = sum(1 for e in run.review.test_plan if e.notes)
