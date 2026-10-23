@@ -15,6 +15,7 @@ import json
 import random
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -92,10 +93,13 @@ class OpenRouter:
         timeout: float = 300.0,
         max_attempts: int = 5,
         client: httpx.Client | None = None,
+        on_event: Callable[[str], None] | None = None,
     ):
         if not models:
             raise ValueError("at least one model is required")
         self.models = models
+        self.timeout = timeout
+        self.on_event = on_event or (lambda msg: None)
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.provider = provider
@@ -137,13 +141,19 @@ class OpenRouter:
         for attempt in range(1, self.max_attempts + 1):
             try:
                 resp = self._client.post(f"{self.base_url}/chat/completions", json=payload)
+            except httpx.TimeoutException as exc:
+                last_error = f"no response within {self.timeout:.0f}s ({type(exc).__name__})"
+                if attempt < self.max_attempts:
+                    self._retry(attempt, None, last_error)
+                continue
             except httpx.HTTPError as exc:
                 last_error = f"transport error: {exc}"
-                self._sleep(attempt, None)
+                if attempt < self.max_attempts:
+                    self._retry(attempt, None, last_error)
                 continue
             if resp.status_code in RETRY_STATUSES and attempt < self.max_attempts:
                 last_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
-                self._sleep(attempt, resp.headers.get("Retry-After"))
+                self._retry(attempt, resp.headers.get("Retry-After"), last_error)
                 continue
             if resp.status_code >= 400:
                 if _is_context_length(resp.status_code, resp.text):
@@ -155,8 +165,8 @@ class OpenRouter:
                 msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
                 code = err.get("code") if isinstance(err, dict) else None
                 if code in RETRY_STATUSES and attempt < self.max_attempts:
-                    last_error = msg
-                    self._sleep(attempt, None)
+                    last_error = f"OpenRouter {code}: {msg[:300]}"
+                    self._retry(attempt, None, last_error)
                     continue
                 if _is_context_length(int(code or 400), msg):
                     raise ContextLengthError(f"OpenRouter error: {msg}")
@@ -173,14 +183,23 @@ class OpenRouter:
             )
         raise OpenRouterError(f"giving up after {self.max_attempts} attempts: {last_error}")
 
+    def _retry(self, attempt: int, retry_after: str | None, why: str) -> None:
+        delay = self._delay(attempt, retry_after)
+        self.on_event(f"model request failed ({why}); retry {attempt + 1}/{self.max_attempts} in {delay:.0f}s")
+        self._sleep(delay)
+
     @staticmethod
-    def _sleep(attempt: int, retry_after: str | None) -> None:
+    def _delay(attempt: int, retry_after: str | None) -> float:
         delay = min(60.0, 2.0**attempt + random.uniform(0, 1))
         if retry_after:
             try:
                 delay = max(delay, float(retry_after))
             except ValueError:
                 pass
+        return delay
+
+    @staticmethod
+    def _sleep(delay: float) -> None:
         time.sleep(delay)
 
 

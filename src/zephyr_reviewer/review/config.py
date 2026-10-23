@@ -58,6 +58,8 @@ class ReviewConfig:
     max_tokens: int = 8000
     max_steps: int = 40
     max_context_tokens: int = 160_000
+    model_timeout_seconds: int = 300  # per model request
+    max_stage_seconds: int = 0  # wall-clock budget per agent run (0 = none); forces submission when exceeded
     max_tool_result_chars: int = 24_000
     inline_diff_chars: int = 60_000
     prefetch_chars: int = 24_000  # 0 disables prefetched context in the opening message
@@ -119,6 +121,8 @@ class ReviewConfig:
         cfg.max_tokens = int(_env("max_tokens", str(cfg.max_tokens)))
         cfg.max_steps = int(_env("max_steps", str(cfg.max_steps)))
         cfg.max_context_tokens = int(_env("max_context_tokens", str(cfg.max_context_tokens)))
+        cfg.model_timeout_seconds = int(_env("model_timeout_seconds", str(cfg.model_timeout_seconds)))
+        cfg.max_stage_seconds = int(_env("max_stage_seconds", str(cfg.max_stage_seconds)))
         cfg.max_tool_result_chars = int(_env("max_tool_result_chars", str(cfg.max_tool_result_chars)))
         cfg.inline_diff_chars = int(_env("inline_diff_chars", str(cfg.inline_diff_chars)))
         cfg.prefetch_chars = int(_env("prefetch_chars", str(cfg.prefetch_chars)))

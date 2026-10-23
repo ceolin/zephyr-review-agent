@@ -95,6 +95,16 @@ inputs:
     description: "Prompt size at which the review is forced to conclude."
     required: false
     default: "160000"
+  model_timeout_seconds:
+    description: "Seconds to wait for one model response before retrying."
+    required: false
+    default: "300"
+  max_stage_seconds:
+    description: >-
+      Wall-clock budget for each agent run (the review, or each stage of a staged pipeline). When
+      exceeded the model is forced to submit what it has. 0 disables.
+    required: false
+    default: "0"
   max_tool_result_chars:
     description: "Size cap on each tool result handed to the model."
     required: false
@@ -268,6 +278,8 @@ runs:
         INPUT_MAX_TOKENS: ${{ inputs.max_tokens }}
         INPUT_MAX_STEPS: ${{ inputs.max_steps }}
         INPUT_MAX_CONTEXT_TOKENS: ${{ inputs.max_context_tokens }}
+        INPUT_MODEL_TIMEOUT_SECONDS: ${{ inputs.model_timeout_seconds }}
+        INPUT_MAX_STAGE_SECONDS: ${{ inputs.max_stage_seconds }}
         INPUT_MAX_TOOL_RESULT_CHARS: ${{ inputs.max_tool_result_chars }}
         INPUT_PREFETCH_CHARS: ${{ inputs.prefetch_chars }}
         INPUT_INLINE_DIFF_CHARS: ${{ inputs.inline_diff_chars }}

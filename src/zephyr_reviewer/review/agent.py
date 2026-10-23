@@ -112,11 +112,15 @@ async def run_agent(
     max_steps: int = 40,
     max_context_tokens: int = 160_000,
     max_rejections: int = 2,
+    max_seconds: float = 0,
     extra_tools: list[LocalTool] | None = None,
     log=print,
     label: str = "",
 ) -> AgentResult:
-    """Model proposes tool calls, the bridge and local tools answer, until the terminal tool is accepted."""
+    """Model proposes tool calls, the bridge and local tools answer, until the terminal tool is accepted.
+
+    ``max_seconds`` (0 = none) is a wall-clock budget: once exceeded, the next model call is forced to submit.
+    While a model call is outstanding a heartbeat line is logged every ``HEARTBEAT_SECONDS``."""
     started = time.monotonic()
     tag = f"[{label}] " if label else ""
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, {"role": "user", "content": opening}]
@@ -141,16 +145,23 @@ async def run_agent(
         )
 
     for step in range(1, max_steps + 1):
-        budget_out = step >= max_steps or last_prompt_tokens > max_context_tokens
+        elapsed = time.monotonic() - started
+        out_of_time = max_seconds > 0 and elapsed > max_seconds
+        budget_out = step >= max_steps or last_prompt_tokens > max_context_tokens or out_of_time
         tool_choice: str | dict[str, Any] = "auto"
         if budget_out and not forced:
             forced = True
+            why = f"time budget of {max_seconds:.0f}s" if out_of_time else "step or context budget"
+            log(f"{tag}[step {step}] {why} exhausted; forcing {terminal.name}")
             messages.append({"role": "user", "content": budget_exhausted(terminal.name)})
         if forced:
             tool_choice = {"type": "function", "function": {"name": terminal.name}}
 
+        approx_tokens = sum(len(str(m.get("content") or "")) for m in messages) // 4
+        log(f"{tag}[step {step}] waiting for {llm.models[0]} ({len(messages)} messages, ~{approx_tokens:,} tokens)")
+        t_call = time.monotonic()
         try:
-            result = await asyncio.to_thread(llm.chat, messages, tools, tool_choice)
+            result = await _chat_with_heartbeat(llm, messages, tools, tool_choice, log, tag, step)
         except ContextLengthError as exc:
             compactions += 1
             # First elide older tool results and retry; then everything and force submission; then give up.
@@ -176,6 +187,10 @@ async def run_agent(
         last_prompt_tokens = int((result.usage or {}).get("prompt_tokens") or 0)
         if result.model and result.model not in models:
             models.append(result.model)
+        log(
+            f"{tag}[step {step}] {result.model or llm.models[0]} answered in {time.monotonic() - t_call:.1f}s "
+            f"({len(result.tool_calls)} tool call(s), {last_prompt_tokens:,} prompt tokens)"
+        )
         messages.append(assistant_message_for_history(result.message))
         transcript.append(
             {
@@ -269,6 +284,21 @@ async def run_agent(
     return done(None, max_steps)
 
 
+HEARTBEAT_SECONDS = 30.0
+
+
+async def _chat_with_heartbeat(llm, messages, tools, tool_choice, log, tag: str, step: int):
+    """Run the blocking model call in a thread; say so periodically while it is outstanding."""
+    task = asyncio.ensure_future(asyncio.to_thread(llm.chat, messages, tools, tool_choice))
+    waited = 0.0
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_SECONDS)
+        if done:
+            return task.result()
+        waited += HEARTBEAT_SECONDS
+        log(f"{tag}[step {step}] still waiting for {llm.models[0]} ({waited:.0f}s; request timeout {llm.timeout:.0f}s)")
+
+
 ELIDED = "[tool result elided to fit the context window; call the tool again if you still need it]"
 
 
@@ -299,6 +329,7 @@ async def run_review(
     max_steps: int = 40,
     max_context_tokens: int = 160_000,
     max_rejections: int = 2,
+    max_seconds: float = 0,
     extra_tools: list[LocalTool] | None = None,
     log=print,
 ) -> RunResult:
@@ -312,6 +343,7 @@ async def run_review(
         max_steps=max_steps,
         max_context_tokens=max_context_tokens,
         max_rejections=max_rejections,
+        max_seconds=max_seconds,
         extra_tools=extra_tools,
         log=log,
     )

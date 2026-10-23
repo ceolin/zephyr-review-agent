@@ -60,6 +60,12 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--prefetch-chars", type=int, help="Budget for prefetched function context in the opening (0 disables)"
     )
+    p.add_argument("--model-timeout", type=int, help="Seconds to wait for one model response (default 300)")
+    p.add_argument(
+        "--max-stage-seconds",
+        type=int,
+        help="Wall-clock budget per agent run; when exceeded the model is forced to submit (0 = none)",
+    )
     p.add_argument("--max-context-tokens", type=int)
     p.add_argument("--test-plan", action="store_true", help="Also produce a test plan: suites, scenarios, platforms")
     p.add_argument(
@@ -141,6 +147,10 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         cfg.in_process_server = True
     if args.prefetch_chars is not None:
         cfg.prefetch_chars = args.prefetch_chars
+    if args.model_timeout is not None:
+        cfg.model_timeout_seconds = args.model_timeout
+    if args.max_stage_seconds is not None:
+        cfg.max_stage_seconds = args.max_stage_seconds
     # Safety settings: the environment (workflow inputs) is the operator floor; flags may only tighten it.
     policy, rejected = floor.tighten(
         lockdown=args.lockdown,
@@ -295,6 +305,8 @@ async def _run(
         temperature=cfg.temperature,
         max_tokens=cfg.max_tokens,
         provider=cfg.provider,
+        timeout=cfg.model_timeout_seconds,
+        on_event=log,
     )
     if cfg.in_process_server:
         target = mcp_server.build_server(intel)
@@ -310,6 +322,8 @@ async def _run(
                 temperature=cfg.temperature,
                 max_tokens=cfg.max_tokens,
                 provider=cfg.provider,
+                timeout=cfg.model_timeout_seconds,
+                on_event=log,
             )
             if cfg.draft_models
             else llm
@@ -330,6 +344,7 @@ async def _run(
                 hard_case_max_steps=cfg.hard_case_max_steps,
                 max_hard_cases=cfg.max_hard_cases,
                 max_context_tokens=cfg.max_context_tokens,
+                max_seconds=cfg.max_stage_seconds,
                 extra_tools=extra_tools,
                 log=log,
             )
@@ -347,6 +362,7 @@ async def _run(
                 dossier_chars=cfg.dossier_chars,
                 extra_tools=extra_tools,
                 verify_system=verify_system,
+                max_seconds=cfg.max_stage_seconds,
                 log=log,
             )
         else:
@@ -358,6 +374,7 @@ async def _run(
                 changed,
                 max_steps=cfg.max_steps,
                 max_context_tokens=cfg.max_context_tokens,
+                max_seconds=cfg.max_stage_seconds,
                 extra_tools=extra_tools,
                 log=log,
             )
@@ -581,6 +598,8 @@ def cmd_benchmark_run(args: argparse.Namespace) -> int:
             temperature=0.0,
             max_tokens=1000,
             provider=cfg.provider,
+            timeout=cfg.model_timeout_seconds,
+            on_event=log,
         )
     log(f"benchmark: {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} -> {out_dir}")
     report = asyncio.run(

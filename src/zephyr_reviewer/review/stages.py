@@ -151,6 +151,7 @@ async def run_two_stage(
     dossier_chars: int = 40_000,
     extra_tools: list[LocalTool] | None = None,
     verify_system: str | None = None,
+    max_seconds: float = 0,
     log=print,
 ) -> RunResult:
     """``system`` drives the draft; ``verify_system`` (default: the same) drives the verifier, and is where
@@ -166,6 +167,7 @@ async def run_two_stage(
         changed_lines,
         max_steps=max_steps,
         max_context_tokens=max_context_tokens,
+        max_seconds=max_seconds,
         extra_tools=extra_tools,
         log=lambda m: log("  " + m),
     )
@@ -193,6 +195,7 @@ async def run_two_stage(
         changed_lines,
         max_steps=verify_steps,
         max_context_tokens=max_context_tokens,
+        max_seconds=max_seconds,
         extra_tools=extra_tools,
         log=lambda m: log("  " + m),
     )

@@ -310,6 +310,24 @@ never lowers a level. A finding whose trigger path rests on an unverified assump
 `speculative`, reported with severity capped at medium, and never dropped for being "probably
 unreachable". Edit the two files to tune the reviewer's judgement without touching code.
 
+### Budgets, timeouts and what you are waiting for
+
+Every model request is announced in the log with the model, message count and approximate prompt
+size, and answered with its duration and the number of tool calls it made. While a request is
+outstanding a heartbeat line appears every 30 seconds with the elapsed time and the request
+timeout, so a slow or stuck provider is visible as such. Retries after transient errors or timeouts
+are logged with the reason and the wait. Four limits bound a run:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `max_steps` | 40 | Model turns before the review is forced to submit |
+| `max_context_tokens` | 160000 | Prompt size at which it is forced to submit |
+| `model_timeout_seconds` | 300 | Wait for one model response before retrying |
+| `max_stage_seconds` | 0 (off) | Wall-clock budget per agent run (each stage in a staged pipeline); forces submission |
+
+A forced submission is marked in the log and in the run details, and a review cut short should be
+read with that in mind.
+
 ### Issues only
 
 The review reports problems and nothing else. The summary states the result and the key issue
