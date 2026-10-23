@@ -313,9 +313,10 @@ unreachable". Edit the two files to tune the reviewer's judgement without touchi
 ### Budgets, timeouts and what you are waiting for
 
 Every model request is announced in the log with the model, message count and approximate prompt
-size, and answered with its duration and the number of tool calls it made. While a request is
-outstanding a heartbeat line appears every 30 seconds with the elapsed time and the request
-timeout, so a slow or stuck provider is visible as such. Retries after transient errors or timeouts
+size, and answered with its duration and the number of tool calls it made. While a model request
+or a tool call is outstanding a heartbeat line appears every 30 seconds naming what is being waited
+for, so a slow provider or a stuck lookup is visible as such. The MCP server runs its lookups in
+worker threads, so one slow call never holds up the other stages' calls behind it. Retries after transient errors or timeouts
 are logged with the reason and the wait. Four limits bound a run:
 
 | Setting | Default | Effect |
@@ -323,6 +324,7 @@ are logged with the reason and the wait. Four limits bound a run:
 | `max_steps` | 40 | Model turns before the review is forced to submit |
 | `max_context_tokens` | 160000 | Prompt size at which it is forced to submit |
 | `model_timeout_seconds` | 300 | Wait for one model response before retrying |
+| `tool_timeout_seconds` | 120 | Wait for one tool call; a hung lookup becomes an error the model sees and works around |
 | `max_stage_seconds` | 0 (off) | Wall-clock budget per agent run (each stage in a staged pipeline); forces submission |
 
 A forced submission is marked in the log and in the run details, and a review cut short should be

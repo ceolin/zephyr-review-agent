@@ -101,7 +101,7 @@ def _load_meta(repo: GitRepo, meta_path: str, why: str) -> TestSuite | None:
 def suite_containing(repo: GitRepo, path: str) -> TestSuite | None:
     """For a path inside tests/ or samples/, the metadata of the enclosing suite."""
     d = _suite_dir(path)
-    files = set(repo.files())
+    files = repo.fileset()
     while True:
         for meta in _META_FILES:
             cand = f"{d}/{meta}" if d else meta
@@ -133,7 +133,7 @@ def suites_referencing(repo: GitRepo, symbol: str, limit: int = 30) -> list[Test
     for h in [*hits, *hits2]:
         d = _suite_dir(h.path)
         # Walk up to the suite root (dir that holds a metadata file).
-        files = set(repo.files())
+        files = repo.fileset()
         while d and not any(f"{d}/{m}" in files for m in _META_FILES):
             d = _suite_dir(d)
         if d:
@@ -155,7 +155,7 @@ def changed_suite_dirs(repo: GitRepo, changed: list[str]) -> dict[str, list[str]
     Walks up from each changed file to a directory holding a metadata file. A ``common`` directory
     without one maps to every suite beside it. Returns {suite_dir: [changed files]}.
     """
-    files = set(repo.files())
+    files = repo.fileset()
     out: dict[str, list[str]] = {}
     for f in changed:
         if f.endswith(".rst"):

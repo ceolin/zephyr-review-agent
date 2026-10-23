@@ -11,6 +11,7 @@ expects, and turns tool results back into bounded text.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import time
 from dataclasses import dataclass, field
@@ -53,6 +54,7 @@ class ToolCallRecord:
 class ToolBridge:
     target: StdioServerParameters | MCPServer | str
     max_result_chars: int = 24_000
+    call_timeout: float = 120.0  # seconds per tool call; a hung lookup becomes an error the model can see
     tools: list[dict[str, Any]] = field(default_factory=list)
     calls: list[ToolCallRecord] = field(default_factory=list)
     _client: Client | None = None
@@ -84,21 +86,40 @@ class ToolBridge:
         return {t["function"]["name"] for t in self.tools}
 
     async def call(self, name: str, arguments: dict[str, Any]) -> str:
+        text, _ = await self.call_with_record(name, arguments)
+        return text
+
+    def _timeout_text(self, name: str) -> str:
+        return _timeout_message(name, self.call_timeout)
+
+    async def call_with_record(self, name: str, arguments: dict[str, Any]) -> tuple[str, ToolCallRecord]:
         assert self._client is not None, "bridge not started"
         started = time.monotonic()
         try:
-            result = await self._client.call_tool(name, arguments)
+            result = await asyncio.wait_for(
+                self._client.call_tool(name, arguments, read_timeout_seconds=self.call_timeout),
+                timeout=self.call_timeout + 5,
+            )
             texts = [c.text for c in result.content if getattr(c, "type", "") == "text"]
             text = "\n".join(texts) if texts else (str(result.structured_content or "") or "(empty result)")
             is_error = bool(result.is_error)
+        except TimeoutError:
+            text, is_error = self._timeout_text(name), True
         except Exception as exc:  # noqa: BLE001 - a failed lookup is information for the model, not a crash
             text, is_error = f"{type(exc).__name__}: {exc}", True
+            if "timed out" in str(exc).lower() or "timeout" in type(exc).__name__.lower():
+                text = self._timeout_text(name)
         if is_error and not text.startswith("ERROR"):
             text = "ERROR: " + text
         if len(text) > self.max_result_chars:
             text = text[: self.max_result_chars] + f"\n... [result truncated to {self.max_result_chars} characters]"
-        self.calls.append(ToolCallRecord(name, arguments, len(text), is_error, time.monotonic() - started))
-        return text
+        record = ToolCallRecord(name, arguments, len(text), is_error, time.monotonic() - started)
+        self.calls.append(record)
+        return text, record
+
+
+def _timeout_message(name: str, seconds: float) -> str:
+    return f"tool call {name} did not finish within {seconds:.0f}s; narrow the query or try another tool"
 
 
 def _clean_schema(schema: dict[str, Any] | None) -> dict[str, Any]:

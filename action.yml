@@ -99,6 +99,10 @@ inputs:
     description: "Seconds to wait for one model response before retrying."
     required: false
     default: "300"
+  tool_timeout_seconds:
+    description: "Seconds to wait for one source-intelligence tool call before reporting it as failed."
+    required: false
+    default: "120"
   max_stage_seconds:
     description: >-
       Wall-clock budget for each agent run (the review, or each stage of a staged pipeline). When
@@ -279,6 +283,7 @@ runs:
         INPUT_MAX_STEPS: ${{ inputs.max_steps }}
         INPUT_MAX_CONTEXT_TOKENS: ${{ inputs.max_context_tokens }}
         INPUT_MODEL_TIMEOUT_SECONDS: ${{ inputs.model_timeout_seconds }}
+        INPUT_TOOL_TIMEOUT_SECONDS: ${{ inputs.tool_timeout_seconds }}
         INPUT_MAX_STAGE_SECONDS: ${{ inputs.max_stage_seconds }}
         INPUT_MAX_TOOL_RESULT_CHARS: ${{ inputs.max_tool_result_chars }}
         INPUT_PREFETCH_CHARS: ${{ inputs.prefetch_chars }}

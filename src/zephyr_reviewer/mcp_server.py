@@ -10,6 +10,7 @@ The tool surface is the stable contract; see ``intel.service.SourceIntel``.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 from typing import Any, TypedDict
 
@@ -109,40 +110,45 @@ instead of guessing. Results are plain text, bounded in size; narrow a query whe
 def build_server(intel: SourceIntel, name: str = "zephyr-source-intel") -> MCPServer:
     srv = MCPServer(name, instructions=INSTRUCTIONS, version="0.1.0")
 
-    def guard(fn, *args, **kwargs) -> str:
+    def _guarded(fn, *args, **kwargs):
         try:
             return fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 - surface the cause to the model, do not crash the server
             raise ToolError(f"{type(exc).__name__}: {exc}") from exc
 
+    async def guard(fn, *args, **kwargs):
+        """Run a lookup in a worker thread: the intel is synchronous git plumbing, and several review
+        stages call tools concurrently; blocking the event loop would serialize them behind the slowest."""
+        return await asyncio.to_thread(_guarded, fn, *args, **kwargs)
+
     @srv.tool()
-    def pr_overview() -> OverviewOut:
+    async def pr_overview() -> OverviewOut:
         """Commits, changed files with +/- counts, and the MAINTAINERS areas each file falls in. Call this first."""
-        return guard(lambda: _both(intel.overview(), intel.overview_data()))
+        return await guard(lambda: _both(intel.overview(), intel.overview_data()))
 
     @srv.tool(structured_output=False)
-    def commit_messages() -> str:
+    async def commit_messages() -> str:
         """Full commit messages of the pull request, oldest first (Zephyr reviews the message, not only the code)."""
-        return guard(intel.commit_messages)
+        return await guard(intel.commit_messages)
 
     @srv.tool(structured_output=False)
-    def file_diff(path: str, context_lines: int = 3) -> str:
+    async def file_diff(path: str, context_lines: int = 3) -> str:
         """Unified diff of one changed file between base and head, with the given context."""
-        return guard(intel.diff_for, path, context_lines)
+        return await guard(intel.diff_for, path, context_lines)
 
     @srv.tool(structured_output=False)
-    def read_file(path: str, start_line: int = 1, end_line: int | None = None) -> str:
+    async def read_file(path: str, start_line: int = 1, end_line: int | None = None) -> str:
         """Read a file at the head commit with line numbers; lines added by the PR are marked '+'.
         At most 400 lines per call; omit end_line to read 400 lines from start_line."""
-        return guard(intel.read, path, start_line, end_line)
+        return await guard(intel.read, path, start_line, end_line)
 
     @srv.tool(structured_output=False)
-    def read_file_at_base(path: str, start_line: int = 1, end_line: int | None = None) -> str:
+    async def read_file_at_base(path: str, start_line: int = 1, end_line: int | None = None) -> str:
         """Read a file as it was at the base commit, to compare old and new behavior."""
-        return guard(intel.read_base, path, start_line, end_line)
+        return await guard(intel.read_base, path, start_line, end_line)
 
     @srv.tool(structured_output=False)
-    def search(
+    async def search(
         pattern: str,
         path: str | None = None,
         regex: bool = True,
@@ -152,7 +158,7 @@ def build_server(intel: SourceIntel, name: str = "zephyr-source-intel") -> MCPSe
     ) -> str:
         """grep the head tree. path may be a directory (drivers/i2c) or a glob (drivers/**/*.c).
         Regex is POSIX extended as in git grep: use [[:space:]] not \\s, and whole_word instead of \\b."""
-        return guard(
+        return await guard(
             intel.search,
             pattern,
             path,
@@ -163,71 +169,71 @@ def build_server(intel: SourceIntel, name: str = "zephyr-source-intel") -> MCPSe
         )
 
     @srv.tool(structured_output=False)
-    def list_files(pattern: str) -> str:
+    async def list_files(pattern: str) -> str:
         """List files matching a glob at the head commit, e.g. dts/bindings/i2c/*.yaml or tests/drivers/i2c/**."""
-        return guard(intel.list_files, pattern)
+        return await guard(intel.list_files, pattern)
 
     @srv.tool()
-    def find_definition(name: str, path: str | None = None) -> DefinitionsOut:
+    async def find_definition(name: str, path: str | None = None) -> DefinitionsOut:
         """Where a C function, macro, struct, typedef, Kconfig symbol (CONFIG_FOO), devicetree compatible
         (vendor,device) or CMake function is defined. Optionally restrict to a path."""
-        return guard(lambda: _both(intel.definition(name, path), intel.definition_data(name, path)))
+        return await guard(lambda: _both(intel.definition(name, path), intel.definition_data(name, path)))
 
     @srv.tool(structured_output=False)
-    def find_references(name: str, path: str | None = None, max_results: int = 60) -> str:
+    async def find_references(name: str, path: str | None = None, max_results: int = 60) -> str:
         """Who uses a symbol: counts per area, then individual sites, changed files first."""
-        return guard(intel.references, name, path, max_results)
+        return await guard(intel.references, name, path, max_results)
 
     @srv.tool(structured_output=False)
-    def kconfig_symbol(name: str) -> str:
+    async def kconfig_symbol(name: str) -> str:
         """Every definition block of a Kconfig symbol (depends on, select, default, help) and its users
         in Kconfig, .conf/defconfig, CMake and source."""
-        return guard(intel.kconfig, name)
+        return await guard(intel.kconfig, name)
 
     @srv.tool(structured_output=False)
-    def dt_binding(compatible_or_name: str) -> str:
+    async def dt_binding(compatible_or_name: str) -> str:
         """The devicetree binding YAML for a compatible, plus the drivers (DT_DRV_COMPAT) and nodes using it."""
-        return guard(intel.dt_binding, compatible_or_name)
+        return await guard(intel.dt_binding, compatible_or_name)
 
     @srv.tool()
-    def maintainers(path: str) -> MaintainersOut:
+    async def maintainers(path: str) -> MaintainersOut:
         """MAINTAINERS.yml areas covering a path: status, maintainers, collaborators, labels, test identifiers."""
-        return guard(lambda: _both(intel.maintainers_for(path), intel.maintainers_data(path)))
+        return await guard(lambda: _both(intel.maintainers_for(path), intel.maintainers_data(path)))
 
     @srv.tool(structured_output=False)
-    def related_tests(path_or_symbol: str) -> str:
+    async def related_tests(path_or_symbol: str) -> str:
         """Twister suites (tests.yaml / sample.yaml) covering a path or mentioning a symbol, with tags and platforms."""
-        return guard(intel.related_tests, path_or_symbol)
+        return await guard(intel.related_tests, path_or_symbol)
 
     @srv.tool(structured_output=False)
-    def test_candidates() -> str:
+    async def test_candidates() -> str:
         """Everything a test plan for this change should consider: suites the PR edits, MAINTAINERS test
         identifiers, implicated twister tags, suites covering the changed source (with scenarios, tags,
         integration_platforms, platform_allow), and the platforms implicated by changed boards, SoCs,
         architectures and driver bindings."""
-        return guard(intel.test_candidates)
+        return await guard(intel.test_candidates)
 
     @srv.tool()
-    def list_platforms(fragment: str) -> PlatformsOut:
+    async def list_platforms(fragment: str) -> PlatformsOut:
         """Valid twister platform identifiers (board/soc[/qualifiers]) whose name, board or vendor contains
         the fragment, e.g. 'nrf5340', 'qemu', 'native', 'stm32h7'. Use it to validate a test plan."""
-        return guard(lambda: _both(intel.platforms(fragment), intel.platforms_data(fragment)))
+        return await guard(lambda: _both(intel.platforms(fragment), intel.platforms_data(fragment)))
 
     @srv.tool(structured_output=False)
-    def file_history(path: str, count: int = 10) -> str:
+    async def file_history(path: str, count: int = 10) -> str:
         """Recent commits touching a path at the head commit."""
-        return guard(intel.history, path, count)
+        return await guard(intel.history, path, count)
 
     @srv.tool(structured_output=False)
-    def blame(path: str, start_line: int, end_line: int) -> str:
+    async def blame(path: str, start_line: int, end_line: int) -> str:
         """git blame for a line range at the head commit (at most 200 lines)."""
-        return guard(intel.blame, path, start_line, end_line)
+        return await guard(intel.blame, path, start_line, end_line)
 
     @srv.tool(structured_output=False)
-    def project_guidelines(topic: str = "agents") -> str:
+    async def project_guidelines(topic: str = "agents") -> str:
         """Zephyr contribution rules. Topics: agents, guidelines, expectations, reviewer, style-c, style-kconfig,
         style-cmake, style-devicetree, coding-guidelines, bindings, kconfig-tips, or a doc/ path."""
-        return guard(intel.guidelines, topic)
+        return await guard(intel.guidelines, topic)
 
     return srv
 

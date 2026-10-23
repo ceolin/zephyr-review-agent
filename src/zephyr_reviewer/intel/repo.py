@@ -67,6 +67,8 @@ class GitRepo:
         self.ref = ref
         self.sha = self.rev_parse(ref)
         self._files: list[str] | None = None
+        self._fileset: set[str] | None = None
+        self._dirs: set[str] | None = None
 
     # ------------------------------------------------------------------ plumbing
     def _run(self, *args: str, check: bool = True, max_bytes: int | None = None) -> str:
@@ -117,12 +119,25 @@ class GitRepo:
             self._files = [p for p in out.split("\0") if p]
         return self._files
 
+    def fileset(self) -> set[str]:
+        if self._fileset is None:
+            self._fileset = set(self.files())
+        return self._fileset
+
     def exists(self, path: str) -> bool:
-        return path in set(self.files())
+        return path in self.fileset()
 
     def is_dir(self, path: str) -> bool:
-        prefix = path.rstrip("/") + "/"
-        return any(p.startswith(prefix) for p in self.files())
+        if self._dirs is None:
+            dirs: set[str] = set()
+            for p in self.files():
+                while "/" in p:
+                    p = p.rsplit("/", 1)[0]
+                    if p in dirs:
+                        break
+                    dirs.add(p)
+            self._dirs = dirs
+        return path.rstrip("/") in self._dirs
 
     def glob(self, pattern: str, limit: int = 500) -> list[str]:
         pattern = pattern.strip()

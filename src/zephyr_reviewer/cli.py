@@ -61,6 +61,7 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
         "--prefetch-chars", type=int, help="Budget for prefetched function context in the opening (0 disables)"
     )
     p.add_argument("--model-timeout", type=int, help="Seconds to wait for one model response (default 300)")
+    p.add_argument("--tool-timeout", type=int, help="Seconds to wait for one tool call (default 120)")
     p.add_argument(
         "--max-stage-seconds",
         type=int,
@@ -149,6 +150,8 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         cfg.prefetch_chars = args.prefetch_chars
     if args.model_timeout is not None:
         cfg.model_timeout_seconds = args.model_timeout
+    if args.tool_timeout is not None:
+        cfg.tool_timeout_seconds = args.tool_timeout
     if args.max_stage_seconds is not None:
         cfg.max_stage_seconds = args.max_stage_seconds
     # Safety settings: the environment (workflow inputs) is the operator floor; flags may only tighten it.
@@ -312,7 +315,9 @@ async def _run(
         target = mcp_server.build_server(intel)
     else:
         target = stdio_params(cfg.repo_root, cfg.head, cfg.base, cfg.max_tool_result_chars)
-    async with ToolBridge(target, max_result_chars=cfg.max_tool_result_chars) as bridge:
+    async with ToolBridge(
+        target, max_result_chars=cfg.max_tool_result_chars, call_timeout=float(cfg.tool_timeout_seconds)
+    ) as bridge:
         log(f"MCP server up with {len(bridge.tools)} tool(s); models: {', '.join(cfg.models)}")
         cheap_llm = (
             OpenRouter(

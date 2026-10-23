@@ -257,8 +257,11 @@ async def run_agent(
                     )
                     tool_results.append({"name": name, "arguments": args, "content": content})
                 elif bridge is not None and name in bridge_names:
-                    content = await bridge.call(name, args)
-                    rec = bridge.calls[-1]
+                    label_call = f"{tag}[step {step}] still waiting for tool {name}({_short(args)})"
+                    content, rec = await _with_heartbeat(
+                        bridge.call_with_record(name, args),
+                        lambda waited, msg=label_call: log(f"{msg} ({waited:.0f}s)"),
+                    )
                     log(
                         f"{tag}[step {step}] {name}({_short(args)}) -> {rec.result_chars} chars"
                         f"{' ERROR' if rec.is_error else ''} in {rec.seconds:.1f}s"
@@ -287,16 +290,26 @@ async def run_agent(
 HEARTBEAT_SECONDS = 30.0
 
 
-async def _chat_with_heartbeat(llm, messages, tools, tool_choice, log, tag: str, step: int):
-    """Run the blocking model call in a thread; say so periodically while it is outstanding."""
-    task = asyncio.ensure_future(asyncio.to_thread(llm.chat, messages, tools, tool_choice))
+async def _with_heartbeat(awaitable, on_wait):
+    """Await something, calling ``on_wait(seconds)`` every HEARTBEAT_SECONDS while it is outstanding."""
+    task = asyncio.ensure_future(awaitable)
     waited = 0.0
     while True:
         done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_SECONDS)
         if done:
             return task.result()
         waited += HEARTBEAT_SECONDS
-        log(f"{tag}[step {step}] still waiting for {llm.models[0]} ({waited:.0f}s; request timeout {llm.timeout:.0f}s)")
+        on_wait(waited)
+
+
+async def _chat_with_heartbeat(llm, messages, tools, tool_choice, log, tag: str, step: int):
+    """Run the blocking model call in a thread; say so periodically while it is outstanding."""
+    return await _with_heartbeat(
+        asyncio.to_thread(llm.chat, messages, tools, tool_choice),
+        lambda waited: log(
+            f"{tag}[step {step}] still waiting for {llm.models[0]} ({waited:.0f}s; request timeout {llm.timeout:.0f}s)"
+        ),
+    )
 
 
 ELIDED = "[tool result elided to fit the context window; call the tool again if you still need it]"
