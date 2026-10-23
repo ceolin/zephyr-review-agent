@@ -311,3 +311,29 @@ async def test_agent_offers_the_discussion_tool_and_digest(mini_repo):
     body = render_comment(run.review, run, pr, repo="o/r", tag="zephyr-reviewer")
     assert "### Unresolved discussion" in body and "still unaddressed" in body
     assert json.dumps(run.review.to_dict())  # serializable for review.json
+
+
+def test_no_discussion_flag_removes_discussion_from_config_and_prompt(monkeypatch):
+    from zephyr_reviewer import cli
+    from zephyr_reviewer.review.github_api import PullRequest
+    from zephyr_reviewer.review.prompts import load_profile, system_prompt
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    args = cli.build_parser().parse_args(["review", "--base", "main", "--no-discussion", "--dry-run"])
+    cfg = cli._config(args)
+    assert cfg.include_discussion is False
+    cfg_default = cli._config(cli.build_parser().parse_args(["review", "--base", "main", "--dry-run"]))
+    assert cfg_default.include_discussion is True
+
+    with_disc = system_prompt(load_profile("zephyr"), "English", discussion=True)
+    without = system_prompt(load_profile("zephyr"), "English", discussion=False)
+    assert "`pr_discussion`" in with_disc and "No existing discussion is provided" not in with_disc
+    assert "pr_discussion" not in without and "No existing discussion is provided for this review" in without
+    assert "leave\n  `discussion_assessment` empty" in without
+
+    # With a PR and a client, ignoring the discussion fetches nothing.
+    logs: list[str] = []
+    monkeypatch.setattr(cli, "log", logs.append)
+    pr = PullRequest(7, "", "", "author", "", "", "", "", "", False)
+    assert cli._load_discussion(cfg, _gh(), pr) is None
+    assert any("ignored" in m for m in logs)

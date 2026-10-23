@@ -69,6 +69,11 @@ def _add_review_args(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--no-ci", action="store_true", help="Do not fetch CI results")
     p.add_argument(
+        "--no-discussion",
+        action="store_true",
+        help="Ignore existing reviews and comments on the PR so they cannot influence the review (testing)",
+    )
+    p.add_argument(
         "--show-details", action="store_true", help="Append models, steps, tokens, cost and time to the posted comment"
     )
     p.add_argument("--inline", action="store_true", help="Post anchored findings as inline review comments (default)")
@@ -128,6 +133,8 @@ def _config(args: argparse.Namespace) -> ReviewConfig:
         cfg.generate_test_plan = True
     if args.no_ci:
         cfg.include_ci = False
+    if args.no_discussion:
+        cfg.include_discussion = False
     if args.show_details:
         cfg.show_run_details = True
     if args.in_process:
@@ -222,6 +229,9 @@ def _skip_reason(cfg: ReviewConfig, pr: PullRequest) -> str | None:
 
 
 def _load_discussion(cfg: ReviewConfig, gh: GitHub | None, pr: PullRequest) -> Discussion | None:
+    if gh is not None and pr.number and not cfg.include_discussion:
+        log("existing reviews and comments ignored (include_discussion=false)")
+        return None
     if gh is None or not pr.number or not cfg.include_discussion:
         return None
     d = Discussion.fetch(gh, pr.number, f"<!-- {cfg.comment_tag} -->", lockdown=cfg.lockdown, pr_author=pr.author)
@@ -254,8 +264,8 @@ async def _run(
     profile = load_profile(cfg.profile)
     mode = cfg.effective_pipeline()
     # The single agent applies the guides itself; staged pipelines apply them where findings are confirmed.
-    system = system_prompt(profile, cfg.language, include_guides=(mode == "single"))
-    verify_system = system_prompt(profile, cfg.language, include_guides=True)
+    system = system_prompt(profile, cfg.language, include_guides=(mode == "single"), discussion=cfg.include_discussion)
+    verify_system = system_prompt(profile, cfg.language, include_guides=True, discussion=cfg.include_discussion)
     overview = intel.overview()
     diff = intel.diff_text if len(intel.diff_text) <= cfg.inline_diff_chars else None
     digest = discussion.digest(cfg.max_discussion_chars) if discussion else None
@@ -630,7 +640,7 @@ def cmd_call(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="zephyr-reviewer", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -696,8 +706,11 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("tool")
     c.add_argument("args", nargs="*", help="key=value arguments")
     c.set_defaults(fn=cmd_call)
+    return p
 
-    args = p.parse_args(argv)
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     return args.fn(args)
 
 

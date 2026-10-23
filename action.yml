@@ -131,7 +131,10 @@ inputs:
     required: false
     default: "label"
   include_discussion:
-    description: "Give the model the existing conversation, inline review threads and review states."
+    description: >-
+      Give the model the existing conversation, inline review threads and review states. Set to
+      false to review the change on its own merits, unaffected by what was already said (useful
+      when testing).
     required: false
     default: "true"
   max_discussion_chars:
