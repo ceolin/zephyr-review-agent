@@ -28,8 +28,18 @@ class Definition:
 _C_EXTS = (".c", ".h", ".cpp", ".hpp", ".cc", ".S", ".ld", ".cmake")
 _C_KEYWORDS = {"return", "if", "else", "while", "for", "switch", "case", "goto", "sizeof", "do", "typedef"}
 _IDENT = r"[A-Za-z_]\w*"
-# A declaration-specifier prefix: identifiers, qualifiers and '*' only, at least one token (the return type).
-_SPECIFIERS = re.compile(rf"^\s*((?:{_IDENT}|\*)\s*)+$")
+# Tokens of a declaration-specifier prefix. Tokenizing and checking each token is linear; the previous
+# single regex of the form ((ident|*)\s*)+$ could split one identifier into many and backtracked
+# exponentially on lines it failed to match, freezing the server (the regex engine holds the GIL).
+_SPEC_TOKEN = re.compile(r"[A-Za-z_]\w*|\*|\S")
+
+
+def _is_specifier_prefix(before: str) -> bool:
+    """True when ``before`` consists only of identifiers, qualifiers and '*' (a plausible return type)."""
+    if len(before) > 300:
+        return False
+    tokens = _SPEC_TOKEN.findall(before)
+    return bool(tokens) and all(t == "*" or (t[0].isalpha() or t[0] == "_") for t in tokens)
 
 
 def _looks_like_c_definition(name: str, text: str) -> str | None:
@@ -41,7 +51,7 @@ def _looks_like_c_definition(name: str, text: str) -> str | None:
     if not m:
         return None
     before = text[: m.start()]
-    if not _SPECIFIERS.match(before):
+    if not _is_specifier_prefix(before):
         return None
     tokens = re.findall(_IDENT, before)
     if not tokens or any(t in _C_KEYWORDS for t in tokens):

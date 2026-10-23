@@ -197,3 +197,30 @@ def test_results_are_clipped(mini_repo):
     small = SourceIntel(str(mini_repo["root"]), mini_repo["head"], mini_repo["base"], max_chars=200)
     text = small.read("drivers/i2c/i2c_foo.c")
     assert len(text) < 400 and "truncated to 200 characters" in text
+
+
+def test_definition_classifier_is_linear_on_pathological_lines():
+    """A long identifier prefix on a line that is not a definition used to backtrack exponentially."""
+    import time
+
+    from zephyr_reviewer.intel.prefetch import _is_function_header
+    from zephyr_reviewer.intel.repo import GrepHit
+    from zephyr_reviewer.intel.symbols import _kind_of
+
+    long_ident = "x" * 60
+    lines = [
+        f"\t{long_ident} = Z_EXC_HANDLE(foo);",  # assignment: prefix fails the specifier test
+        f"{long_ident}{long_ident} Z_EXC_HANDLE(a, b) {{",  # single huge token
+        "\t" + " ".join(["aaa"] * 40) + " = Z_EXC_HANDLE(x);",
+        "#if defined(Z_EXC_HANDLE) && " + "(" * 50 + "y" + ")" * 50,
+    ]
+    t = time.monotonic()
+    for line in lines:
+        _kind_of("Z_EXC_HANDLE", GrepHit("a.c", 1, line))
+        _is_function_header(line)
+    assert time.monotonic() - t < 1.0
+    # Real definitions still classify.
+    assert _kind_of("foo", GrepHit("a.c", 1, "static const struct device *foo(void)")) == "function"
+    assert _kind_of("foo", GrepHit("a.c", 1, "unsigned long long **foo(int a,")) == "function"
+    assert _is_function_header("static inline int foo(void)") == "foo"
+    assert _is_function_header("const struct k_thread *const foo(void)") == "foo"

@@ -21,7 +21,9 @@ from .repo import GitRepo
 _C_EXTS = (".c", ".h", ".cpp", ".hpp", ".cc")
 _SMALL_WHOLE_EXTS = (".yaml", ".yml", ".dts", ".dtsi", ".overlay", ".conf", ".cmake")
 _IDENT = r"[A-Za-z_]\w*"
-_HEADER = re.compile(rf"^(?P<spec>(?:{_IDENT}|\*)(?:[\s*]+(?:{_IDENT}|\*))*)\s+\**\s*(?P<name>{_IDENT})\s*\(")
+# Specifier tokens separated by mandatory whitespace; '*' may be glued to a token. Unambiguous, so
+# the match is linear (no way to split a token two ways on a failing line).
+_HEADER = re.compile(rf"^(?P<spec>[A-Za-z_*][\w*]*(?:\s+[A-Za-z_*][\w*]*)*?)\s+\**\s*(?P<name>{_IDENT})\s*\(")
 _KEYWORDS = {"if", "else", "while", "for", "switch", "return", "do", "case", "goto", "sizeof", "typedef"}
 MAX_FUNCTION_LINES = 160
 WINDOW = 25
