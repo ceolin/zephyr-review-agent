@@ -29,7 +29,7 @@ inputs:
   model:
     description: "Primary OpenRouter model slug."
     required: false
-    default: "anthropic/claude-sonnet-4.5"
+    default: "deepseek/deepseek-v4.1-flash"
   fallback_models:
     description: "Comma-separated OpenRouter slugs tried in order if the primary is unavailable."
     required: false

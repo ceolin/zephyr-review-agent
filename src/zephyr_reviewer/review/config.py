@@ -44,7 +44,7 @@ class ReviewConfig:
 
     openrouter_api_key: str = ""
     base_url: str = "https://openrouter.ai/api/v1"
-    models: list[str] = field(default_factory=lambda: ["anthropic/claude-sonnet-4.5"])
+    models: list[str] = field(default_factory=lambda: ["deepseek/deepseek-v4.1-flash"])
     provider: dict | None = None
     pipeline: str = "auto"  # auto | single | two-stage | multi-stage
     draft_models: list[str] = field(default_factory=list)  # two-stage drafts and multi-stage specialists run here

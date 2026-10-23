@@ -209,7 +209,7 @@ Investigation turns dominate cost: the whole transcript is resent on every call.
 
 ```yaml
 with:
-  model: anthropic/claude-sonnet-4.5     # verifies and finalizes
+  model: deepseek/deepseek-v4.1-flash     # verifies and finalizes
   draft_model: google/gemini-2.5-flash   # investigates and drafts
   verify_max_steps: "15"
 ```
@@ -369,7 +369,7 @@ zephyr-reviewer benchmark mine --repo ~/zephyrproject/zephyr --range upstream/ma
 # Review every culprit against its parent, judge each result, and report.
 export OPENROUTER_API_KEY=sk-or-...
 zephyr-reviewer benchmark run benchmarks/zephyr-fixes.json --repo ~/zephyrproject/zephyr \
-    --limit 20 --concurrency 3 --judge-model anthropic/claude-sonnet-4.5
+    --limit 20 --concurrency 3 --judge-model deepseek/deepseek-v4.1-flash
 
 # Re-grade an existing run (new judge model or prompt) without reviewing again.
 zephyr-reviewer benchmark run benchmarks/zephyr-fixes.json --repo ~/zephyrproject/zephyr \
