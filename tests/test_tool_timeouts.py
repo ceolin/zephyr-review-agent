@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 
 from mcp.server.mcpserver import MCPServer
@@ -60,7 +61,7 @@ async def test_server_tools_run_off_the_event_loop(mini_repo):
         assert all("@alice" in t for t in fast_texts) and time.monotonic() - t0 < 10
     # The tool functions are coroutines, so the server awaits them in worker threads.
     tools = srv._tool_manager.list_tools() if hasattr(srv, "_tool_manager") else []
-    assert all(asyncio.iscoroutinefunction(t.fn) for t in tools) if tools else True
+    assert all(inspect.iscoroutinefunction(t.fn) for t in tools) if tools else True
 
 
 async def test_tool_heartbeat_and_per_call_records(monkeypatch):
